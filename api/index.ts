@@ -23,16 +23,17 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 registerStorageProxy(app);
 registerOAuthRoutes(app);
 
-app.use(
-  "/api/trpc",
-  createExpressMiddleware({
-    router: appRouter,
-    createContext,
-  })
-);
+const trpcMiddleware = createExpressMiddleware({
+  router: appRouter,
+  createContext,
+});
 
+// Handle /api/trpc, /trpc, and direct endpoint requests on Vercel serverless
+app.use("/api/trpc", trpcMiddleware);
+app.use("/trpc", trpcMiddleware);
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "quick-clipboard-serverless" });
 });
+app.use(trpcMiddleware);
 
 export default app;

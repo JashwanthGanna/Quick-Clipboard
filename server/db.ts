@@ -94,6 +94,10 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+import fs from "fs";
+import path from "path";
+import os from "os";
+
 // In-Memory Fallback Storage
 type InMemoryClipboard = Clipboard & { content: string };
 type InMemoryFile = SharedFile;
@@ -109,6 +113,41 @@ let memoryClipboardIdCounter = 1;
 let memoryFileIdCounter = 1;
 let memoryRoomIdCounter = 1;
 let memoryRoomFileIdCounter = 1;
+
+const TEMP_STORAGE_FILE = path.join(os.tmpdir(), "qc_storage_cache.json");
+
+function loadTempStorage() {
+  try {
+    if (fs.existsSync(TEMP_STORAGE_FILE)) {
+      const raw = fs.readFileSync(TEMP_STORAGE_FILE, "utf-8");
+      const data = JSON.parse(raw);
+      if (data && data.clipboards) {
+        Object.entries(data.clipboards).forEach(([code, item]: [string, any]) => {
+          memoryClipboards.set(code, item);
+        });
+      }
+      if (data && data.files) {
+        Object.entries(data.files).forEach(([code, item]: [string, any]) => {
+          memoryFiles.set(code, item);
+        });
+      }
+    }
+  } catch (err) {
+    // Ignore read errors
+  }
+}
+
+function saveTempStorage() {
+  try {
+    const data = {
+      clipboards: Object.fromEntries(memoryClipboards),
+      files: Object.fromEntries(memoryFiles),
+    };
+    fs.writeFileSync(TEMP_STORAGE_FILE, JSON.stringify(data), "utf-8");
+  } catch (err) {
+    // Ignore write errors
+  }
+}
 
 const globalStats = {
   filesSharedCount: 142,
@@ -153,48 +192,71 @@ export async function createClipboard(options: {
   const expiresAt = parseExpiryOption(options.expiryOption || "24h");
   const selfDestruct = options.selfDestruct ? 1 : 0;
   const destructMode = options.destructMode || (selfDestruct ? "view" : "none");
-  const db = await getDb();
+
+  loadTempStorage();
 
   let code: string;
   let attempts = 0;
 
-  if (!db) {
-    do {
-      code = generateNumericCode(6);
-      attempts++;
-    } while (memoryClipboards.has(code) && attempts < 100);
+  try {
+    const db = await getDb();
+    if (db) {
+      let isUnique = false;
+      do {
+        code = generateNumericCode(6);
+        const existing = await db.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
+        isUnique = existing.length === 0;
+        attempts++;
+      } while (!isUnique && attempts < 100);
 
-    const item: InMemoryClipboard = {
-      id: memoryClipboardIdCounter++,
-      code,
-      content: options.content,
-      selfDestruct,
-      destructMode,
-      password: options.password || null,
-      viewCount: 0,
-      maxViews: options.maxViews || (destructMode === "view" ? 1 : null),
-      downloadCount: 0,
-      maxDownloads: options.maxDownloads || null,
-      viewed: 0,
-      createdAt: new Date(),
-      expiresAt: expiresAt,
-    };
-    memoryClipboards.set(code, item);
-    globalStats.textSharesCount++;
-    return code;
+      if (isUnique) {
+        await db.insert(clipboards).values({
+          code,
+          content: options.content,
+          selfDestruct,
+          destructMode,
+          password: options.password || null,
+          viewCount: 0,
+          maxViews: options.maxViews || (destructMode === "view" ? 1 : null),
+          downloadCount: 0,
+          maxDownloads: options.maxDownloads || null,
+          viewed: 0,
+          expiresAt: expiresAt as any,
+        });
+
+        const item: InMemoryClipboard = {
+          id: memoryClipboardIdCounter++,
+          code,
+          content: options.content,
+          selfDestruct,
+          destructMode,
+          password: options.password || null,
+          viewCount: 0,
+          maxViews: options.maxViews || (destructMode === "view" ? 1 : null),
+          downloadCount: 0,
+          maxDownloads: options.maxDownloads || null,
+          viewed: 0,
+          createdAt: new Date(),
+          expiresAt: expiresAt,
+        };
+        memoryClipboards.set(code, item);
+        saveTempStorage();
+
+        globalStats.textSharesCount++;
+        return code;
+      }
+    }
+  } catch (err) {
+    console.warn("[Database] MySQL write failed, using memory/file storage fallback:", err);
   }
 
-  let isUnique = false;
   do {
     code = generateNumericCode(6);
-    const existing = await db.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
-    isUnique = existing.length === 0;
     attempts++;
-  } while (!isUnique && attempts < 100);
+  } while (memoryClipboards.has(code) && attempts < 100);
 
-  if (!isUnique) throw new Error("Failed to generate unique code");
-
-  await db.insert(clipboards).values({
+  const item: InMemoryClipboard = {
+    id: memoryClipboardIdCounter++,
     code,
     content: options.content,
     selfDestruct,
@@ -205,8 +267,11 @@ export async function createClipboard(options: {
     downloadCount: 0,
     maxDownloads: options.maxDownloads || null,
     viewed: 0,
-    expiresAt: expiresAt as any,
-  });
+    createdAt: new Date(),
+    expiresAt: expiresAt,
+  };
+  memoryClipboards.set(code, item);
+  saveTempStorage();
 
   globalStats.textSharesCount++;
   return code;
@@ -220,23 +285,32 @@ function isExpired(expiresAt: Date | string | null | undefined): boolean {
 }
 
 export async function getClipboardByCode(code: string) {
-  const db = await getDb();
-  if (!db) {
-    const clipboard = memoryClipboards.get(code);
-    if (!clipboard) return null;
-    if (isExpired(clipboard.expiresAt)) {
-      memoryClipboards.delete(code);
-      return null;
+  loadTempStorage();
+
+  try {
+    const db = await getDb();
+    if (db) {
+      const result = await db.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
+      if (result.length > 0) {
+        const clipboard = result[0];
+        if (isExpired(clipboard.expiresAt)) {
+          await db.delete(clipboards).where(eq(clipboards.code, code));
+          memoryClipboards.delete(code);
+          saveTempStorage();
+          return null;
+        }
+        return clipboard;
+      }
     }
-    return clipboard;
+  } catch (err) {
+    console.warn("[Database] MySQL read failed, falling back to memory/file storage:", err);
   }
 
-  const result = await db.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
-  if (result.length === 0) return null;
-
-  const clipboard = result[0];
+  const clipboard = memoryClipboards.get(code);
+  if (!clipboard) return null;
   if (isExpired(clipboard.expiresAt)) {
-    await db.delete(clipboards).where(eq(clipboards.code, code));
+    memoryClipboards.delete(code);
+    saveTempStorage();
     return null;
   }
   return clipboard;
@@ -303,50 +377,75 @@ export async function createFile(options: {
   const expiresAt = parseExpiryOption(options.expiryOption || "24h");
   const selfDestruct = options.selfDestruct ? 1 : 0;
   const destructMode = options.destructMode || (selfDestruct ? "download" : "none");
-  const db = await getDb();
+
+  loadTempStorage();
 
   let code: string;
   let attempts = 0;
 
-  if (!db) {
-    do {
-      code = generateNumericCode(6);
-      attempts++;
-    } while (memoryFiles.has(code) && attempts < 100);
+  try {
+    const db = await getDb();
+    if (db) {
+      let isUnique = false;
+      do {
+        code = generateNumericCode(6);
+        const existing = await db.select().from(files).where(eq(files.code, code)).limit(1);
+        isUnique = existing.length === 0;
+        attempts++;
+      } while (!isUnique && attempts < 100);
 
-    const item: InMemoryFile = {
-      id: memoryFileIdCounter++,
-      code,
-      originalName: options.originalName,
-      mimeType: options.mimeType,
-      fileSize: options.fileSize,
-      filePath: options.filePath,
-      password: options.password || null,
-      selfDestruct,
-      destructMode,
-      viewCount: 0,
-      maxViews: options.maxViews || null,
-      downloadCount: 0,
-      maxDownloads: options.maxDownloads || (destructMode === "download" ? 1 : null),
-      createdAt: new Date(),
-      expiresAt: expiresAt,
-    };
-    memoryFiles.set(code, item);
-    globalStats.filesSharedCount++;
-    return code;
+      if (isUnique) {
+        await db.insert(files).values({
+          code,
+          originalName: options.originalName,
+          mimeType: options.mimeType,
+          fileSize: options.fileSize,
+          filePath: options.filePath,
+          password: options.password || null,
+          selfDestruct,
+          destructMode,
+          viewCount: 0,
+          maxViews: options.maxViews || null,
+          downloadCount: 0,
+          maxDownloads: options.maxDownloads || (destructMode === "download" ? 1 : null),
+          expiresAt: expiresAt as any,
+        });
+
+        const item: InMemoryFile = {
+          id: memoryFileIdCounter++,
+          code,
+          originalName: options.originalName,
+          mimeType: options.mimeType,
+          fileSize: options.fileSize,
+          filePath: options.filePath,
+          password: options.password || null,
+          selfDestruct,
+          destructMode,
+          viewCount: 0,
+          maxViews: options.maxViews || null,
+          downloadCount: 0,
+          maxDownloads: options.maxDownloads || (destructMode === "download" ? 1 : null),
+          createdAt: new Date(),
+          expiresAt: expiresAt,
+        };
+        memoryFiles.set(code, item);
+        saveTempStorage();
+
+        globalStats.filesSharedCount++;
+        return code;
+      }
+    }
+  } catch (err) {
+    console.warn("[Database] MySQL file write failed, using memory/file storage fallback:", err);
   }
 
-  let isUnique = false;
   do {
     code = generateNumericCode(6);
-    const existing = await db.select().from(files).where(eq(files.code, code)).limit(1);
-    isUnique = existing.length === 0;
     attempts++;
-  } while (!isUnique && attempts < 100);
+  } while (memoryFiles.has(code) && attempts < 100);
 
-  if (!isUnique) throw new Error("Failed to generate unique file code");
-
-  await db.insert(files).values({
+  const item: InMemoryFile = {
+    id: memoryFileIdCounter++,
     code,
     originalName: options.originalName,
     mimeType: options.mimeType,
@@ -359,31 +458,43 @@ export async function createFile(options: {
     maxViews: options.maxViews || null,
     downloadCount: 0,
     maxDownloads: options.maxDownloads || (destructMode === "download" ? 1 : null),
-    expiresAt: expiresAt as any,
-  });
+    createdAt: new Date(),
+    expiresAt: expiresAt,
+  };
+  memoryFiles.set(code, item);
+  saveTempStorage();
 
   globalStats.filesSharedCount++;
   return code;
 }
 
 export async function getFileByCode(code: string) {
-  const db = await getDb();
-  if (!db) {
-    const file = memoryFiles.get(code);
-    if (!file) return null;
-    if (isExpired(file.expiresAt)) {
-      memoryFiles.delete(code);
-      return null;
+  loadTempStorage();
+
+  try {
+    const db = await getDb();
+    if (db) {
+      const result = await db.select().from(files).where(eq(files.code, code)).limit(1);
+      if (result.length > 0) {
+        const file = result[0];
+        if (isExpired(file.expiresAt)) {
+          await db.delete(files).where(eq(files.code, code));
+          memoryFiles.delete(code);
+          saveTempStorage();
+          return null;
+        }
+        return file;
+      }
     }
-    return file;
+  } catch (err) {
+    console.warn("[Database] MySQL file read failed, falling back to memory/file storage:", err);
   }
 
-  const result = await db.select().from(files).where(eq(files.code, code)).limit(1);
-  if (result.length === 0) return null;
-
-  const file = result[0];
+  const file = memoryFiles.get(code);
+  if (!file) return null;
   if (isExpired(file.expiresAt)) {
-    await db.delete(files).where(eq(files.code, code));
+    memoryFiles.delete(code);
+    saveTempStorage();
     return null;
   }
   return file;
