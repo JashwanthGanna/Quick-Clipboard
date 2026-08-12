@@ -182,7 +182,7 @@ export const appRouter = router({
         // Convert base64 data to buffer and save to local disk
         const base64Clean = input.base64Data.replace(/^data:[^;]+;base64,/, "");
         const buffer = Buffer.from(base64Clean, "base64");
-        const saved = await saveUploadedFile(buffer, input.filename);
+        const saved = await saveUploadedFile(buffer, input.filename, input.mimeType);
 
         const code = await createFile({
           originalName: input.filename,

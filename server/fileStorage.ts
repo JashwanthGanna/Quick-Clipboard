@@ -1,12 +1,20 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import os from "os";
 
-const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const UPLOAD_DIR = isVercel ? path.join(os.tmpdir(), "uploads") : path.join(process.cwd(), "uploads");
 
-// Ensure upload directory exists
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  }
+} catch (e) {
+  const fallbackDir = path.join(os.tmpdir(), "uploads");
+  if (!fs.existsSync(fallbackDir)) {
+    fs.mkdirSync(fallbackDir, { recursive: true });
+  }
 }
 
 export const ALLOWED_EXTENSIONS = [
@@ -46,19 +54,31 @@ export function validateFileTypeAndSize(filename: string, fileSize: number): { v
 
 export async function saveUploadedFile(
   buffer: Buffer,
-  originalFilename: string
+  originalFilename: string,
+  mimeType?: string
 ): Promise<{ filename: string; relativeUrl: string; filePath: string }> {
   const ext = path.extname(originalFilename).toLowerCase();
   const safeHash = crypto.randomBytes(8).toString("hex");
   const storedFilename = `${Date.now()}_${safeHash}${ext}`;
-  const filePath = path.join(UPLOAD_DIR, storedFilename);
 
-  await fs.promises.writeFile(filePath, buffer);
+  const effectiveMime = mimeType || "application/octet-stream";
+  const dataUrl = `data:${effectiveMime};base64,${buffer.toString("base64")}`;
+
+  try {
+    const uploadDir = path.join(os.tmpdir(), "uploads");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    const localFilePath = path.join(uploadDir, storedFilename);
+    await fs.promises.writeFile(localFilePath, buffer);
+  } catch (err) {
+    console.warn("Serverless mode disk write skipped, using Data URL fallback", err);
+  }
 
   return {
     filename: storedFilename,
-    relativeUrl: `/uploads/${storedFilename}`,
-    filePath,
+    relativeUrl: dataUrl,
+    filePath: dataUrl,
   };
 }
 
