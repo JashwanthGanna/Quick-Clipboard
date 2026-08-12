@@ -1,17 +1,17 @@
 export const navigation = {
   main: [
-    { label: "Home", href: "/" },
-    { label: "Features", href: "/#features" },
-    { label: "How It Works", href: "/#how-it-works" },
-    { label: "FAQ", href: "/#faq" },
-    { label: "About", href: "/about" },
-    { label: "Contact", href: "/contact" },
+    { label: "Text Clipboard", href: "/" },
+    { label: "File Sharing", href: "/file-sharing" },
+    { label: "Self-Destruct", href: "/self-destruct" },
+    { label: "Shared Rooms", href: "/rooms" },
+    { label: "OCR Extractor", href: "/ocr" },
   ],
   footer: {
     product: [
-      { label: "Features", href: "/#features" },
-      { label: "How It Works", href: "/#how-it-works" },
-      { label: "FAQ", href: "/#faq" },
+      { label: "File Sharing", href: "/file-sharing" },
+      { label: "Self-Destruct Links", href: "/self-destruct" },
+      { label: "Shared Rooms", href: "/rooms" },
+      { label: "OCR Extractor", href: "/ocr" },
     ],
     company: [
       { label: "About", href: "/about" },
@@ -31,5 +31,5 @@ export const navigation = {
 };
 
 export const appName = "Quick Clipboard";
-export const appTagline = "Share instantly, securely";
-export const appDescription = "Fast, secure, lightweight online clipboard that lets you save and access copied text anywhere.";
+export const appTagline = "Share files, text, rooms & QR instantly";
+export const appDescription = "Powerful SaaS sharing platform for files, text clipboards, self-destruct links, real-time shared rooms, and OCR image extraction.";

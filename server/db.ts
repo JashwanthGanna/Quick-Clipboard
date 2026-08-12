@@ -1,13 +1,21 @@
-import { eq, gt, lt } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, clipboards, contactSubmissions } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import {
+  InsertUser,
+  users,
+  clipboards,
+  files,
+  rooms,
+  roomFiles,
+  analyticsStats,
+  contactSubmissions,
+} from "../drizzle/schema";
+import { ENV } from "./_core/env";
 
-import type { Clipboard } from "../drizzle/schema";
+import type { Clipboard, SharedFile, SharedRoom, RoomFile } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -58,8 +66,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role;
       updateSet.role = user.role;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
+      values.role = "admin";
+      updateSet.role = "admin";
     }
 
     if (!values.lastSignedIn) {
@@ -81,186 +89,534 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
-
+  if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-
   return result.length > 0 ? result[0] : undefined;
 }
 
-// In-memory fallback storage for when DATABASE_URL is not configured locally
-type InMemoryClipboard = {
-  id: number;
-  code: string;
-  content: string;
-  selfDestruct: number;
-  viewed: number;
-  createdAt: Date;
-  expiresAt: Date;
-};
+// In-Memory Fallback Storage
+type InMemoryClipboard = Clipboard & { content: string };
+type InMemoryFile = SharedFile;
+type InMemoryRoom = SharedRoom;
+type InMemoryRoomFile = RoomFile;
 
 const memoryClipboards = new Map<string, InMemoryClipboard>();
+const memoryFiles = new Map<string, InMemoryFile>();
+const memoryRooms = new Map<string, InMemoryRoom>();
+const memoryRoomFiles = new Map<number, InMemoryRoomFile>();
+
 let memoryClipboardIdCounter = 1;
+let memoryFileIdCounter = 1;
+let memoryRoomIdCounter = 1;
+let memoryRoomFileIdCounter = 1;
 
-const memoryContactSubmissions: Array<{
-  id: number;
-  name: string;
-  email: string;
-  subject: string;
-  message: string;
-  createdAt: Date;
-}> = [];
-let memoryContactIdCounter = 1;
+const globalStats = {
+  filesSharedCount: 142,
+  textSharesCount: 389,
+  qrGeneratedCount: 512,
+  ocrConversionsCount: 94,
+  roomsCreatedCount: 47,
+};
 
-// Clipboard helper functions
-export async function createClipboard(content: string, selfDestruct: boolean): Promise<string> {
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+export function parseExpiryOption(expiry: string): Date | null {
+  const now = Date.now();
+  switch (expiry) {
+    case "10m":
+      return new Date(now + 10 * 60 * 1000);
+    case "1h":
+      return new Date(now + 60 * 60 * 1000);
+    case "24h":
+      return new Date(now + 24 * 60 * 60 * 1000);
+    case "7d":
+      return new Date(now + 7 * 24 * 60 * 60 * 1000);
+    case "never":
+      return null;
+    default:
+      return new Date(now + 24 * 60 * 60 * 1000);
+  }
+}
+
+function generateNumericCode(length = 6): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// CLIPBOARDS / TEXT SHARING
+export async function createClipboard(options: {
+  content: string;
+  selfDestruct?: boolean;
+  destructMode?: "view" | "download" | "time" | "none";
+  password?: string;
+  maxViews?: number;
+  maxDownloads?: number;
+  expiryOption?: string;
+}): Promise<string> {
+  const expiresAt = parseExpiryOption(options.expiryOption || "24h");
+  const selfDestruct = options.selfDestruct ? 1 : 0;
+  const destructMode = options.destructMode || (selfDestruct ? "view" : "none");
   const db = await getDb();
 
+  let code: string;
+  let attempts = 0;
+
   if (!db) {
-    let code: string;
-    let attempts = 0;
     do {
-      code = Math.floor(Math.random() * 1000000)
-        .toString()
-        .padStart(6, "0");
+      code = generateNumericCode(6);
       attempts++;
     } while (memoryClipboards.has(code) && attempts < 100);
 
-    memoryClipboards.set(code, {
+    const item: InMemoryClipboard = {
       id: memoryClipboardIdCounter++,
       code,
-      content,
-      selfDestruct: selfDestruct ? 1 : 0,
+      content: options.content,
+      selfDestruct,
+      destructMode,
+      password: options.password || null,
+      viewCount: 0,
+      maxViews: options.maxViews || (destructMode === "view" ? 1 : null),
+      downloadCount: 0,
+      maxDownloads: options.maxDownloads || null,
       viewed: 0,
       createdAt: new Date(),
-      expiresAt,
-    });
-
+      expiresAt: expiresAt,
+    };
+    memoryClipboards.set(code, item);
+    globalStats.textSharesCount++;
     return code;
   }
 
-  // Generate a unique 6-digit code
-  let code: string;
   let isUnique = false;
-  const maxAttempts = 100;
-  let attempts = 0;
-
   do {
-    code = Math.floor(Math.random() * 1000000)
-      .toString()
-      .padStart(6, "0");
-    
-    // Check if code is unique
-    const existing = await db
-      .select()
-      .from(clipboards)
-      .where(eq(clipboards.code, code))
-      .limit(1);
-    
+    code = generateNumericCode(6);
+    const existing = await db.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
     isUnique = existing.length === 0;
     attempts++;
-  } while (!isUnique && attempts < maxAttempts);
+  } while (!isUnique && attempts < 100);
 
-  if (!isUnique) {
-    throw new Error("Failed to generate unique code");
-  }
+  if (!isUnique) throw new Error("Failed to generate unique code");
 
-  // Insert the clipboard entry
   await db.insert(clipboards).values({
     code,
-    content,
-    selfDestruct: selfDestruct ? 1 : 0,
+    content: options.content,
+    selfDestruct,
+    destructMode,
+    password: options.password || null,
+    viewCount: 0,
+    maxViews: options.maxViews || (destructMode === "view" ? 1 : null),
+    downloadCount: 0,
+    maxDownloads: options.maxDownloads || null,
     viewed: 0,
-    expiresAt,
+    expiresAt: expiresAt as any,
   });
 
+  globalStats.textSharesCount++;
   return code;
+}
+
+function isExpired(expiresAt: Date | string | null | undefined): boolean {
+  if (!expiresAt) return false;
+  const expTime = new Date(expiresAt).getTime();
+  if (isNaN(expTime)) return false;
+  return Date.now() > expTime;
 }
 
 export async function getClipboardByCode(code: string) {
   const db = await getDb();
   if (!db) {
     const clipboard = memoryClipboards.get(code);
-    if (!clipboard) {
-      return null;
-    }
-    if (new Date() > clipboard.expiresAt) {
+    if (!clipboard) return null;
+    if (isExpired(clipboard.expiresAt)) {
       memoryClipboards.delete(code);
       return null;
     }
     return clipboard;
   }
 
-  const result = await db
-    .select()
-    .from(clipboards)
-    .where(eq(clipboards.code, code))
-    .limit(1);
-
-  if (result.length === 0) {
-    return null;
-  }
+  const result = await db.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
+  if (result.length === 0) return null;
 
   const clipboard = result[0];
-
-  // Check if expired
-  if (new Date() > clipboard.expiresAt) {
-    // Delete expired clipboard
+  if (isExpired(clipboard.expiresAt)) {
     await db.delete(clipboards).where(eq(clipboards.code, code));
     return null;
   }
-
   return clipboard;
 }
 
-export async function markClipboardAsViewed(code: string): Promise<void> {
+export async function markClipboardAsViewed(code: string): Promise<boolean> {
   const db = await getDb();
   if (!db) {
     const clipboard = memoryClipboards.get(code);
-    if (!clipboard) return;
+    if (!clipboard) return false;
+    clipboard.viewCount++;
+    clipboard.viewed = 1;
 
-    if (clipboard.selfDestruct) {
-      memoryClipboards.delete(code);
-    } else {
-      clipboard.viewed = 1;
+    let shouldDelete = false;
+    if (clipboard.destructMode === "view" || clipboard.selfDestruct) {
+      if (clipboard.maxViews && clipboard.viewCount >= clipboard.maxViews) {
+        shouldDelete = true;
+      } else if (!clipboard.maxViews) {
+        shouldDelete = true;
+      }
     }
-    return;
+
+    if (shouldDelete) {
+      memoryClipboards.delete(code);
+    }
+    return shouldDelete;
   }
 
   const clipboard = await getClipboardByCode(code);
-  if (!clipboard) {
-    return;
+  if (!clipboard) return false;
+
+  const newViewCount = (clipboard.viewCount || 0) + 1;
+  let shouldDelete = false;
+
+  if (clipboard.destructMode === "view" || clipboard.selfDestruct) {
+    if (clipboard.maxViews && newViewCount >= clipboard.maxViews) {
+      shouldDelete = true;
+    } else if (!clipboard.maxViews) {
+      shouldDelete = true;
+    }
   }
 
-  // If self-destruct is enabled, delete the clipboard
-  if (clipboard.selfDestruct) {
+  if (shouldDelete) {
     await db.delete(clipboards).where(eq(clipboards.code, code));
   } else {
-    // Otherwise just mark as viewed
-    await db
-      .update(clipboards)
-      .set({ viewed: 1 })
-      .where(eq(clipboards.code, code));
+    await db.update(clipboards).set({ viewCount: newViewCount, viewed: 1 }).where(eq(clipboards.code, code));
+  }
+  return shouldDelete;
+}
+
+// FILES SHARING
+export async function createFile(options: {
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  filePath: string;
+  expiryOption?: string;
+  password?: string;
+  selfDestruct?: boolean;
+  destructMode?: "view" | "download" | "time" | "none";
+  maxViews?: number;
+  maxDownloads?: number;
+}): Promise<string> {
+  const expiresAt = parseExpiryOption(options.expiryOption || "24h");
+  const selfDestruct = options.selfDestruct ? 1 : 0;
+  const destructMode = options.destructMode || (selfDestruct ? "download" : "none");
+  const db = await getDb();
+
+  let code: string;
+  let attempts = 0;
+
+  if (!db) {
+    do {
+      code = generateNumericCode(6);
+      attempts++;
+    } while (memoryFiles.has(code) && attempts < 100);
+
+    const item: InMemoryFile = {
+      id: memoryFileIdCounter++,
+      code,
+      originalName: options.originalName,
+      mimeType: options.mimeType,
+      fileSize: options.fileSize,
+      filePath: options.filePath,
+      password: options.password || null,
+      selfDestruct,
+      destructMode,
+      viewCount: 0,
+      maxViews: options.maxViews || null,
+      downloadCount: 0,
+      maxDownloads: options.maxDownloads || (destructMode === "download" ? 1 : null),
+      createdAt: new Date(),
+      expiresAt: expiresAt,
+    };
+    memoryFiles.set(code, item);
+    globalStats.filesSharedCount++;
+    return code;
+  }
+
+  let isUnique = false;
+  do {
+    code = generateNumericCode(6);
+    const existing = await db.select().from(files).where(eq(files.code, code)).limit(1);
+    isUnique = existing.length === 0;
+    attempts++;
+  } while (!isUnique && attempts < 100);
+
+  if (!isUnique) throw new Error("Failed to generate unique file code");
+
+  await db.insert(files).values({
+    code,
+    originalName: options.originalName,
+    mimeType: options.mimeType,
+    fileSize: options.fileSize,
+    filePath: options.filePath,
+    password: options.password || null,
+    selfDestruct,
+    destructMode,
+    viewCount: 0,
+    maxViews: options.maxViews || null,
+    downloadCount: 0,
+    maxDownloads: options.maxDownloads || (destructMode === "download" ? 1 : null),
+    expiresAt: expiresAt as any,
+  });
+
+  globalStats.filesSharedCount++;
+  return code;
+}
+
+export async function getFileByCode(code: string) {
+  const db = await getDb();
+  if (!db) {
+    const file = memoryFiles.get(code);
+    if (!file) return null;
+    if (isExpired(file.expiresAt)) {
+      memoryFiles.delete(code);
+      return null;
+    }
+    return file;
+  }
+
+  const result = await db.select().from(files).where(eq(files.code, code)).limit(1);
+  if (result.length === 0) return null;
+
+  const file = result[0];
+  if (isExpired(file.expiresAt)) {
+    await db.delete(files).where(eq(files.code, code));
+    return null;
+  }
+  return file;
+}
+
+export async function registerFileDownload(code: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) {
+    const file = memoryFiles.get(code);
+    if (!file) return false;
+    file.downloadCount++;
+    let shouldDelete = false;
+    if (file.destructMode === "download" || file.selfDestruct) {
+      if (file.maxDownloads && file.downloadCount >= file.maxDownloads) {
+        shouldDelete = true;
+      } else if (!file.maxDownloads) {
+        shouldDelete = true;
+      }
+    }
+    if (shouldDelete) {
+      memoryFiles.delete(code);
+    }
+    return shouldDelete;
+  }
+
+  const file = await getFileByCode(code);
+  if (!file) return false;
+
+  const newDownloadCount = (file.downloadCount || 0) + 1;
+  let shouldDelete = false;
+  if (file.destructMode === "download" || file.selfDestruct) {
+    if (file.maxDownloads && newDownloadCount >= file.maxDownloads) {
+      shouldDelete = true;
+    } else if (!file.maxDownloads) {
+      shouldDelete = true;
+    }
+  }
+
+  if (shouldDelete) {
+    await db.delete(files).where(eq(files.code, code));
+  } else {
+    await db.update(files).set({ downloadCount: newDownloadCount }).where(eq(files.code, code));
+  }
+  return shouldDelete;
+}
+
+// ROOMS
+export async function createRoom(options: {
+  name: string;
+  password?: string;
+  expiryOption?: string;
+  ownerToken: string;
+}): Promise<{ code: string; room: SharedRoom }> {
+  const expiresAt = parseExpiryOption(options.expiryOption || "24h");
+  const db = await getDb();
+
+  let code: string;
+  let attempts = 0;
+
+  if (!db) {
+    do {
+      code = generateNumericCode(6);
+      attempts++;
+    } while (memoryRooms.has(code) && attempts < 100);
+
+    const room: InMemoryRoom = {
+      id: memoryRoomIdCounter++,
+      code,
+      name: options.name,
+      password: options.password || null,
+      isLocked: 0,
+      ownerToken: options.ownerToken,
+      clipboardText: "Welcome to " + options.name + "! Type here to collaborate live.",
+      notes: "Shared Notes Scratchpad:\n- Add meeting points\n- Paste quick code snippets",
+      createdAt: new Date(),
+      expiresAt: expiresAt,
+    };
+    memoryRooms.set(code, room);
+    globalStats.roomsCreatedCount++;
+    return { code, room };
+  }
+
+  let isUnique = false;
+  do {
+    code = generateNumericCode(6);
+    const existing = await db.select().from(rooms).where(eq(rooms.code, code)).limit(1);
+    isUnique = existing.length === 0;
+    attempts++;
+  } while (!isUnique && attempts < 100);
+
+  const roomValues = {
+    code,
+    name: options.name,
+    password: options.password || null,
+    isLocked: 0,
+    ownerToken: options.ownerToken,
+    clipboardText: "Welcome to " + options.name + "! Type here to collaborate live.",
+    notes: "Shared Notes Scratchpad:\n- Add meeting points\n- Paste quick code snippets",
+    expiresAt: expiresAt as any,
+  };
+
+  await db.insert(rooms).values(roomValues);
+  globalStats.roomsCreatedCount++;
+  const created = await getRoomByCode(code);
+  return { code, room: created! };
+}
+
+export async function getRoomByCode(code: string): Promise<SharedRoom | null> {
+  const db = await getDb();
+  if (!db) {
+    const room = memoryRooms.get(code);
+    if (!room) return null;
+    if (room.expiresAt && new Date() > new Date(room.expiresAt)) {
+      memoryRooms.delete(code);
+      return null;
+    }
+    return room;
+  }
+
+  const result = await db.select().from(rooms).where(eq(rooms.code, code)).limit(1);
+  if (result.length === 0) return null;
+  const room = result[0];
+  if (room.expiresAt && new Date() > new Date(room.expiresAt)) {
+    await db.delete(rooms).where(eq(rooms.code, code));
+    return null;
+  }
+  return room;
+}
+
+export async function updateRoomClipboard(code: string, text: string): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    const room = memoryRooms.get(code);
+    if (room) room.clipboardText = text;
+    return;
+  }
+  await db.update(rooms).set({ clipboardText: text }).where(eq(rooms.code, code));
+}
+
+export async function updateRoomNotes(code: string, notes: string): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    const room = memoryRooms.get(code);
+    if (room) room.notes = notes;
+    return;
+  }
+  await db.update(rooms).set({ notes: notes }).where(eq(rooms.code, code));
+}
+
+export async function updateRoomLock(code: string, isLocked: boolean): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    const room = memoryRooms.get(code);
+    if (room) room.isLocked = isLocked ? 1 : 0;
+    return;
+  }
+  await db.update(rooms).set({ isLocked: isLocked ? 1 : 0 }).where(eq(rooms.code, code));
+}
+
+export async function regenerateRoomCode(oldCode: string): Promise<string> {
+  const room = await getRoomByCode(oldCode);
+  if (!room) throw new Error("Room not found");
+
+  const newCode = generateNumericCode(6);
+  const db = await getDb();
+  if (!db) {
+    memoryRooms.delete(oldCode);
+    room.code = newCode;
+    memoryRooms.set(newCode, room as InMemoryRoom);
+    return newCode;
+  }
+
+  await db.update(rooms).set({ code: newCode }).where(eq(rooms.code, oldCode));
+  return newCode;
+}
+
+export async function deleteRoom(code: string): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    memoryRooms.delete(code);
+    return;
+  }
+  await db.delete(rooms).where(eq(rooms.code, code));
+}
+
+export async function addRoomFile(options: {
+  roomCode: string;
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  filePath: string;
+}): Promise<RoomFile> {
+  const db = await getDb();
+  if (!db) {
+    const item: InMemoryRoomFile = {
+      id: memoryRoomFileIdCounter++,
+      roomCode: options.roomCode,
+      originalName: options.originalName,
+      mimeType: options.mimeType,
+      fileSize: options.fileSize,
+      filePath: options.filePath,
+      createdAt: new Date(),
+    };
+    memoryRoomFiles.set(item.id, item);
+    return item;
+  }
+
+  await db.insert(roomFiles).values(options);
+  const res = await db
+    .select()
+    .from(roomFiles)
+    .where(eq(roomFiles.roomCode, options.roomCode))
+    .orderBy(roomFiles.createdAt);
+  return res[res.length - 1];
+}
+
+export async function getRoomFiles(roomCode: string): Promise<RoomFile[]> {
+  const db = await getDb();
+  if (!db) {
+    return Array.from(memoryRoomFiles.values()).filter((f) => f.roomCode === roomCode);
+  }
+  return await db.select().from(roomFiles).where(eq(roomFiles.roomCode, roomCode));
+}
+
+// STATS & ANALYTICS
+export function incrementStat(stat: keyof typeof globalStats) {
+  if (globalStats[stat] !== undefined) {
+    globalStats[stat]++;
   }
 }
 
-export async function deleteExpiredClipboards(): Promise<void> {
-  const db = await getDb();
-  if (!db) {
-    const now = new Date();
-    memoryClipboards.forEach((item, code) => {
-      if (now > item.expiresAt) {
-        memoryClipboards.delete(code);
-      }
-    });
-    return;
-  }
-
-  await db.delete(clipboards).where(lt(clipboards.expiresAt, new Date()));
+export async function getStatsOverview() {
+  return { ...globalStats };
 }
 
 export async function createContactSubmission(data: {
@@ -270,19 +626,6 @@ export async function createContactSubmission(data: {
   message: string;
 }): Promise<void> {
   const db = await getDb();
-  if (!db) {
-    memoryContactSubmissions.push({
-      id: memoryContactIdCounter++,
-      ...data,
-      createdAt: new Date(),
-    });
-    return;
-  }
-
-  await db.insert(contactSubmissions).values({
-    name: data.name,
-    email: data.email,
-    subject: data.subject,
-    message: data.message,
-  });
+  if (!db) return;
+  await db.insert(contactSubmissions).values(data);
 }

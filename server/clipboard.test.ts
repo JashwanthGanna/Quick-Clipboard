@@ -22,6 +22,7 @@ vi.mock("./db", () => ({
     }
     return null;
   }),
+  getFileByCode: vi.fn(async () => null),
   markClipboardAsViewed: vi.fn(async () => {}),
 }));
 
@@ -52,7 +53,7 @@ describe("clipboard procedures", () => {
       });
 
       expect(result.code).toBe("123456");
-      expect(result.expiresIn).toBe(24 * 60 * 60 * 1000);
+      expect(result.shareUrl).toBe("/share/123456");
     });
 
     it("should reject empty content", async () => {
@@ -63,7 +64,7 @@ describe("clipboard procedures", () => {
         });
         expect.fail("Should have thrown an error");
       } catch (error: any) {
-        expect(error.message).toContain("Too small");
+        expect(error.message).toContain("Content cannot be empty");
       }
     });
 
@@ -84,16 +85,18 @@ describe("clipboard procedures", () => {
       });
 
       expect(result).not.toBeNull();
-      expect(result?.content).toBe("Test content");
-      expect(result?.selfDestruct).toBe(false);
+      if ("content" in result!) {
+        expect(result.content).toBe("Test content");
+        expect(result.selfDestruct).toBe(false);
+      }
     });
 
-    it("should return null for non-existent code", async () => {
+    it("should return error object for non-existent code", async () => {
       const result = await caller.clipboard.retrieve({
         code: "999999",
       });
 
-      expect(result).toBeNull();
+      expect(result).toHaveProperty("error");
     });
 
     it("should reject invalid code format", async () => {

@@ -36,21 +36,103 @@ export const clipboards = mysqlTable("clipboards", {
   code: varchar("code", { length: 6 }).notNull().unique(),
   /** The text content to be shared (unlimited length) */
   content: text("content").notNull(),
-  /** Whether self-destruct mode is enabled (delete after first view) */
+  /** Whether self-destruct mode is enabled (1 or 0) */
   selfDestruct: int("selfDestruct").default(0).notNull(),
+  /** Destruct mode: 'view' | 'download' | 'time' | 'none' */
+  destructMode: varchar("destructMode", { length: 20 }).default("none").notNull(),
+  /** Optional password for access */
+  password: varchar("password", { length: 255 }),
+  /** Number of views so far */
+  viewCount: int("viewCount").default(0).notNull(),
+  /** Maximum views allowed before destruction (null for unlimited) */
+  maxViews: int("maxViews"),
+  /** Number of downloads so far */
+  downloadCount: int("downloadCount").default(0).notNull(),
+  /** Maximum downloads allowed before destruction (null for unlimited) */
+  maxDownloads: int("maxDownloads"),
   /** Whether this clipboard has been viewed */
   viewed: int("viewed").default(0).notNull(),
   /** Timestamp when the clipboard was created */
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  /** Timestamp when the clipboard expires (24 hours after creation) */
-  expiresAt: timestamp("expiresAt").notNull(),
+  /** Timestamp when the clipboard expires (null for never expire) */
+  expiresAt: timestamp("expiresAt"),
 });
 
 export type Clipboard = typeof clipboards.$inferSelect;
 export type InsertClipboard = typeof clipboards.$inferInsert;
-
-// Type override to ensure content is always a string
 export type ClipboardWithContent = Clipboard & { content: string };
+
+/**
+ * Shared files table supporting images, PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, ZIP, TXT up to 50MB.
+ */
+export const files = mysqlTable("files", {
+  id: int("id").autoincrement().primaryKey(),
+  code: varchar("code", { length: 6 }).notNull().unique(),
+  originalName: varchar("originalName", { length: 255 }).notNull(),
+  mimeType: varchar("mimeType", { length: 128 }).notNull(),
+  fileSize: int("fileSize").notNull(),
+  filePath: text("filePath").notNull(),
+  password: varchar("password", { length: 255 }),
+  selfDestruct: int("selfDestruct").default(0).notNull(),
+  destructMode: varchar("destructMode", { length: 20 }).default("none").notNull(),
+  viewCount: int("viewCount").default(0).notNull(),
+  maxViews: int("maxViews"),
+  downloadCount: int("downloadCount").default(0).notNull(),
+  maxDownloads: int("maxDownloads"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt"),
+});
+
+export type SharedFile = typeof files.$inferSelect;
+export type InsertSharedFile = typeof files.$inferInsert;
+
+/**
+ * Collaboration rooms for real-time clipboard, notes, and file sharing.
+ */
+export const rooms = mysqlTable("rooms", {
+  id: int("id").autoincrement().primaryKey(),
+  code: varchar("code", { length: 6 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  password: varchar("password", { length: 255 }),
+  isLocked: int("isLocked").default(0).notNull(),
+  ownerToken: varchar("ownerToken", { length: 64 }).notNull(),
+  clipboardText: text("clipboardText").default("").notNull(),
+  notes: text("notes").default("").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt"),
+});
+
+export type SharedRoom = typeof rooms.$inferSelect;
+export type InsertSharedRoom = typeof rooms.$inferInsert;
+
+/**
+ * Files uploaded within a specific shared room.
+ */
+export const roomFiles = mysqlTable("room_files", {
+  id: int("id").autoincrement().primaryKey(),
+  roomCode: varchar("roomCode", { length: 6 }).notNull(),
+  originalName: varchar("originalName", { length: 255 }).notNull(),
+  mimeType: varchar("mimeType", { length: 128 }).notNull(),
+  fileSize: int("fileSize").notNull(),
+  filePath: text("filePath").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type RoomFile = typeof roomFiles.$inferSelect;
+export type InsertRoomFile = typeof roomFiles.$inferInsert;
+
+/**
+ * Platform analytics and usage statistics.
+ */
+export const analyticsStats = mysqlTable("analytics_stats", {
+  id: int("id").autoincrement().primaryKey(),
+  filesSharedCount: int("filesSharedCount").default(0).notNull(),
+  textSharesCount: int("textSharesCount").default(0).notNull(),
+  qrGeneratedCount: int("qrGeneratedCount").default(0).notNull(),
+  ocrConversionsCount: int("ocrConversionsCount").default(0).notNull(),
+  roomsCreatedCount: int("roomsCreatedCount").default(0).notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 /**
  * Contact form submissions table.

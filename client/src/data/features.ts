@@ -1,4 +1,4 @@
-import { Zap, Shield, Smartphone, Lock, Copy, UserX, Gift, Layout } from "lucide-react";
+import { Zap, Smartphone, Lock, Copy, UserX, Gift, Layout, Sparkles } from "lucide-react";
 
 export const features = [
   {
@@ -49,7 +49,7 @@ export const features = [
   {
     id: "no-login-required",
     title: "No Login Required",
-    description: "Start sharing immediately without creating an account. No emails, no passwords, no tracking - just pure functionality.",
+    description: "Start sharing immediately without creating an account. No emails, no passwords - just pure functionality.",
     icon: UserX,
     iconColor: "text-pink-400",
     bgColor: "bg-pink-500/20",
@@ -101,9 +101,9 @@ export const trustBadges = [
     icon: Zap,
   },
   {
-    id: "privacy-focused",
-    label: "Privacy Focused",
-    description: "No tracking, no ads",
-    icon: Shield,
+    id: "easy-to-use",
+    label: "Easy to Use",
+    description: "Simple 1-click sharing",
+    icon: Sparkles,
   },
 ];
