@@ -78,7 +78,8 @@ export default function SharedRooms() {
   }, []);
 
   useEffect(() => {
-    const socket = io(window.location.origin, {
+    const socketHost = import.meta.env.VITE_API_URL || window.location.origin;
+    const socket = io(socketHost, {
       path: "/socket.io",
       transports: ["websocket", "polling"],
     });

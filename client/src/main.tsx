@@ -37,10 +37,19 @@ queryClient.getMutationCache().subscribe(event => {
   }
 });
 
+function getTrpcUrl(): string {
+  const envApiUrl = import.meta.env.VITE_API_URL;
+  if (envApiUrl) {
+    const cleanUrl = envApiUrl.replace(/\/+$/, "");
+    return cleanUrl.endsWith("/api/trpc") ? cleanUrl : `${cleanUrl}/api/trpc`;
+  }
+  return "/api/trpc";
+}
+
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: "/api/trpc",
+      url: getTrpcUrl(),
       transformer: superjson,
       headers() {
         // Preview auto-login fallback: when the browser blocks iframe cookies
