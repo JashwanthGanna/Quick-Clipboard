@@ -12,6 +12,11 @@ import {
   registerFileDownload,
   createRoom,
   getRoomByCode,
+  updateRoomClipboard,
+  updateRoomNotes,
+  updateRoomLock,
+  regenerateRoomCode,
+  deleteRoom,
   addRoomFile,
   getRoomFiles,
   getStatsOverview,
@@ -323,6 +328,166 @@ export const appRouter = router({
       }),
 
     /**
+     * Join an existing room
+     */
+    join: publicProcedure
+      .input(
+        z.object({
+          code: z.string().min(6).max(6),
+          password: z.string().optional(),
+          name: z.string().optional(),
+          ownerToken: z.string().min(1),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const room = await getRoomByCode(input.code);
+        if (!room) {
+          throw new Error("Room not found or has expired");
+        }
+        if (room.isLocked && room.ownerToken !== input.ownerToken) {
+          throw new Error("Room is locked by owner");
+        }
+        if (room.password && room.password !== input.password) {
+          throw new Error("Incorrect room password");
+        }
+
+        const isOwner = room.ownerToken === input.ownerToken;
+
+        return {
+          success: true,
+          room: {
+            code: room.code,
+            name: room.name,
+            isLocked: Boolean(room.isLocked),
+            isOwner,
+            clipboardText: room.clipboardText,
+            notes: room.notes,
+            createdAt: room.createdAt,
+            expiresAt: room.expiresAt,
+          },
+        };
+      }),
+
+    /**
+     * Poll/Fetch room state sync
+     */
+    getSync: publicProcedure
+      .input(
+        z.object({
+          code: z.string().min(6).max(6),
+          ownerToken: z.string().min(1),
+        })
+      )
+      .query(async ({ input }) => {
+        const room = await getRoomByCode(input.code);
+        if (!room) {
+          return { isDeleted: true };
+        }
+        const isOwner = room.ownerToken === input.ownerToken;
+        return {
+          isDeleted: false,
+          code: room.code,
+          name: room.name,
+          isLocked: Boolean(room.isLocked),
+          isOwner,
+          clipboardText: room.clipboardText,
+          notes: room.notes,
+          expiresAt: room.expiresAt,
+        };
+      }),
+
+    /**
+     * Update room clipboard text
+     */
+    updateClipboard: publicProcedure
+      .input(
+        z.object({
+          code: z.string().min(6).max(6),
+          text: z.string(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        await updateRoomClipboard(input.code, input.text);
+        return { success: true };
+      }),
+
+    /**
+     * Update room notes text
+     */
+    updateNotes: publicProcedure
+      .input(
+        z.object({
+          code: z.string().min(6).max(6),
+          notes: z.string(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        await updateRoomNotes(input.code, input.notes);
+        return { success: true };
+      }),
+
+    /**
+     * Toggle lock status
+     */
+    toggleLock: publicProcedure
+      .input(
+        z.object({
+          code: z.string().min(6).max(6),
+          isLocked: z.boolean(),
+          ownerToken: z.string().min(1),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const room = await getRoomByCode(input.code);
+        if (!room) throw new Error("Room not found");
+        if (room.ownerToken !== input.ownerToken) {
+          throw new Error("Only the room owner can lock/unlock the room");
+        }
+        await updateRoomLock(input.code, input.isLocked);
+        return { success: true, isLocked: input.isLocked };
+      }),
+
+    /**
+     * Regenerate room code
+     */
+    regenerateCode: publicProcedure
+      .input(
+        z.object({
+          code: z.string().min(6).max(6),
+          ownerToken: z.string().min(1),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const room = await getRoomByCode(input.code);
+        if (!room) throw new Error("Room not found");
+        if (room.ownerToken !== input.ownerToken) {
+          throw new Error("Only the room owner can regenerate the room link");
+        }
+        const newCode = await regenerateRoomCode(input.code);
+        return { newCode };
+      }),
+
+    /**
+     * Delete room
+     */
+    deleteRoom: publicProcedure
+      .input(
+        z.object({
+          code: z.string().min(6).max(6),
+          ownerToken: z.string().min(1),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const room = await getRoomByCode(input.code);
+        if (!room) return { success: true };
+        if (room.ownerToken !== input.ownerToken) {
+          throw new Error("Only the room owner can delete this room");
+        }
+        await deleteRoom(input.code);
+        return { success: true };
+      }),
+
+    /**
      * Upload file to room feed
      */
     uploadFile: publicProcedure
@@ -343,7 +508,7 @@ export const appRouter = router({
 
         const base64Clean = input.base64Data.replace(/^data:[^;]+;base64,/, "");
         const buffer = Buffer.from(base64Clean, "base64");
-        const saved = await saveUploadedFile(buffer, input.filename);
+        const saved = await saveUploadedFile(buffer, input.filename, input.mimeType);
 
         const roomFile = await addRoomFile({
           roomCode: input.roomCode,

@@ -62,10 +62,26 @@ export default function SharedRooms() {
   const socketRef = useRef<Socket | null>(null);
 
   const createRoomMutation = trpc.room.create.useMutation();
+  const joinRoomMutation = trpc.room.join.useMutation();
+  const updateClipboardMutation = trpc.room.updateClipboard.useMutation();
+  const updateNotesMutation = trpc.room.updateNotes.useMutation();
+  const toggleLockMutation = trpc.room.toggleLock.useMutation();
+  const regenerateCodeMutation = trpc.room.regenerateCode.useMutation();
+  const deleteRoomMutation = trpc.room.deleteRoom.useMutation();
   const uploadRoomFileMutation = trpc.room.uploadFile.useMutation();
+
   const roomFilesQuery = trpc.room.getFiles.useQuery(
     { roomCode },
     { enabled: Boolean(inRoom && roomCode) }
+  );
+
+  // Poll room sync state every 1.5s when inside a room for production Vercel compatibility
+  const syncQuery = trpc.room.getSync.useQuery(
+    { code: roomCode, ownerToken },
+    {
+      enabled: Boolean(inRoom && roomCode && ownerToken),
+      refetchInterval: 1500,
+    }
   );
 
   useEffect(() => {
@@ -77,71 +93,124 @@ export default function SharedRooms() {
     setOwnerToken(token);
   }, []);
 
+  // Auxiliary Socket.IO setup for local dev / optional socket server
   useEffect(() => {
-    const socketHost = import.meta.env.VITE_API_URL || window.location.origin;
-    const socket = io(socketHost, {
-      path: "/socket.io",
-      transports: ["websocket", "polling"],
-    });
-    socketRef.current = socket;
+    try {
+      const socketHost = import.meta.env.VITE_API_URL || window.location.origin;
+      const socket = io(socketHost, {
+        path: "/socket.io",
+        transports: ["websocket", "polling"],
+        autoConnect: false,
+      });
+      socket.connect();
+      socketRef.current = socket;
 
-    socket.on("room_joined", (data: any) => {
-      setInRoom(true);
-      setRoomName(data.name);
-      setClipboardText(data.clipboardText || "");
-      setNotesText(data.notes || "");
-      setIsLocked(data.isLocked);
-      setIsOwner(data.isOwner);
-      setMembers(data.members || []);
-      toast.success(`Joined room "${data.name}"`);
-    });
+      socket.on("room_joined", (data: any) => {
+        setInRoom(true);
+        if (data.name) setRoomName(data.name);
+        if (data.clipboardText !== undefined) setClipboardText(data.clipboardText || "");
+        if (data.notes !== undefined) setNotesText(data.notes || "");
+        if (data.isLocked !== undefined) setIsLocked(data.isLocked);
+        if (data.isOwner !== undefined) setIsOwner(data.isOwner);
+        if (data.members) setMembers(data.members || []);
+      });
 
-    socket.on("room_members_update", (data: any) => {
-      setMembers(data.members || []);
-    });
+      socket.on("room_members_update", (data: any) => {
+        setMembers(data.members || []);
+      });
 
-    socket.on("clipboard_updated", (data: any) => {
-      setClipboardText(data.text);
-    });
+      socket.on("clipboard_updated", (data: any) => {
+        const activeEl = document.activeElement;
+        if (activeEl?.id !== "clipboard-textarea") {
+          setClipboardText(data.text);
+        }
+      });
 
-    socket.on("notes_updated", (data: any) => {
-      setNotesText(data.notes);
-    });
+      socket.on("notes_updated", (data: any) => {
+        const activeEl = document.activeElement;
+        if (activeEl?.id !== "notes-textarea") {
+          setNotesText(data.notes);
+        }
+      });
 
-    socket.on("room_lock_changed", (data: any) => {
-      setIsLocked(data.isLocked);
-      toast.info(data.isLocked ? "Room was locked by owner." : "Room was unlocked.");
-    });
+      socket.on("room_lock_changed", (data: any) => {
+        setIsLocked(data.isLocked);
+        toast.info(data.isLocked ? "Room was locked by owner." : "Room was unlocked.");
+      });
 
-    socket.on("room_code_regenerated", (data: any) => {
-      setRoomCode(data.newCode);
-      setLocation(`/room/${data.newCode}`);
-      toast.info(`Room link regenerated: Code is now ${data.newCode}`);
-    });
+      socket.on("room_code_regenerated", (data: any) => {
+        setRoomCode(data.newCode);
+        setLocation(`/room/${data.newCode}`);
+        toast.info(`Room link regenerated: Code is now ${data.newCode}`);
+      });
 
-    socket.on("room_deleted", (data: any) => {
-      toast.warning(data.message || "Room was deleted.");
-      setInRoom(false);
-      setLocation("/rooms");
-    });
+      socket.on("room_deleted", (data: any) => {
+        toast.warning(data.message || "Room was deleted.");
+        setInRoom(false);
+        setLocation("/rooms");
+      });
 
-    socket.on("kicked_from_room", (data: any) => {
-      toast.error(data.message || "You were kicked from room.");
-      setInRoom(false);
-    });
-
-    socket.on("room_error", (data: any) => {
-      toast.error(data.message || "Room error");
-    });
-
-    return () => {
-      socket.disconnect();
-    };
+      return () => {
+        socket.disconnect();
+      };
+    } catch (e) {
+      console.warn("Socket initialization skipped:", e);
+    }
   }, [setLocation]);
 
+  // Handle room polling updates (MySQL source of truth)
   useEffect(() => {
-    if (initialCode && socketRef.current && ownerToken && !inRoom) {
+    if (!inRoom || !syncQuery.data) return;
+    const data = syncQuery.data;
+
+    if (data.isDeleted) {
+      toast.warning("Room was deleted or has expired.");
+      setInRoom(false);
+      setLocation("/rooms");
+      return;
+    }
+
+    setIsLocked(Boolean(data.isLocked));
+    setIsOwner(Boolean(data.isOwner));
+    if (data.name) setRoomName(data.name);
+
+    const activeEl = document.activeElement;
+    if (activeEl?.id !== "clipboard-textarea" && data.clipboardText !== undefined) {
+      setClipboardText(data.clipboardText);
+    }
+    if (activeEl?.id !== "notes-textarea" && data.notes !== undefined) {
+      setNotesText(data.notes);
+    }
+  }, [syncQuery.data, inRoom, setLocation]);
+
+  // Auto-join room if navigating directly to /room/:code
+  useEffect(() => {
+    if (initialCode && ownerToken && !inRoom && !joinRoomMutation.isPending) {
       setJoinCodeInput(initialCode);
+      setRoomCode(initialCode);
+      joinRoomMutation
+        .mutateAsync({
+          code: initialCode,
+          ownerToken,
+        })
+        .then((res) => {
+          setInRoom(true);
+          setIsOwner(res.room.isOwner);
+          setIsLocked(res.room.isLocked);
+          setRoomName(res.room.name);
+          setClipboardText(res.room.clipboardText || "");
+          setNotesText(res.room.notes || "");
+          toast.success(`Joined room "${res.room.name}"`);
+
+          socketRef.current?.emit("join_room", {
+            roomCode: res.room.code,
+            name: userName || "Member",
+            ownerToken,
+          });
+        })
+        .catch(() => {
+          // If password required, user can enter password on the join form
+        });
     }
   }, [initialCode, ownerToken, inRoom]);
 
@@ -161,7 +230,14 @@ export default function SharedRooms() {
       });
 
       setRoomCode(res.code);
+      setInRoom(true);
+      setIsOwner(true);
+      setIsLocked(false);
+      setRoomName(res.room.name || newRoomName);
+      setClipboardText(res.room.clipboardText || "");
+      setNotesText(res.room.notes || "");
       setLocation(`/room/${res.code}`);
+      toast.success(`Created room "${res.room.name || newRoomName}"`);
 
       socketRef.current?.emit("join_room", {
         roomCode: res.code,
@@ -174,51 +250,99 @@ export default function SharedRooms() {
     }
   };
 
-  const handleJoinRoom = (e: React.FormEvent) => {
+  const handleJoinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!joinCodeInput.trim()) {
       toast.error("Please enter 6-digit room code.");
       return;
     }
     const cleanCode = joinCodeInput.trim().toUpperCase();
-    setRoomCode(cleanCode);
-    setLocation(`/room/${cleanCode}`);
 
-    socketRef.current?.emit("join_room", {
-      roomCode: cleanCode,
-      password: joinPassword,
-      name: userName,
-      ownerToken,
-    });
+    try {
+      const res = await joinRoomMutation.mutateAsync({
+        code: cleanCode,
+        password: joinPassword || undefined,
+        name: userName || "Member",
+        ownerToken,
+      });
+
+      setRoomCode(res.room.code);
+      setInRoom(true);
+      setIsOwner(res.room.isOwner);
+      setIsLocked(res.room.isLocked);
+      setRoomName(res.room.name);
+      setClipboardText(res.room.clipboardText || "");
+      setNotesText(res.room.notes || "");
+      setLocation(`/room/${res.room.code}`);
+      toast.success(`Joined room "${res.room.name}"`);
+
+      socketRef.current?.emit("join_room", {
+        roomCode: res.room.code,
+        password: joinPassword,
+        name: userName || "Member",
+        ownerToken,
+      });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to join room.");
+    }
   };
 
   const handleClipboardChange = (val: string) => {
     setClipboardText(val);
-    socketRef.current?.emit("update_clipboard", { roomCode, text: val });
+    if (roomCode) {
+      updateClipboardMutation.mutate({ code: roomCode, text: val });
+      socketRef.current?.emit("update_clipboard", { roomCode, text: val });
+    }
   };
 
   const handleNotesChange = (val: string) => {
     setNotesText(val);
-    socketRef.current?.emit("update_notes", { roomCode, notes: val });
+    if (roomCode) {
+      updateNotesMutation.mutate({ code: roomCode, notes: val });
+      socketRef.current?.emit("update_notes", { roomCode, notes: val });
+    }
   };
 
-  const handleToggleLock = () => {
+  const handleToggleLock = async () => {
     const nextLocked = !isLocked;
     setIsLocked(nextLocked);
-    socketRef.current?.emit("lock_room", { roomCode, isLocked: nextLocked });
+    try {
+      await toggleLockMutation.mutateAsync({ code: roomCode, isLocked: nextLocked, ownerToken });
+      toast.info(nextLocked ? "Room was locked by owner." : "Room was unlocked.");
+      socketRef.current?.emit("lock_room", { roomCode, isLocked: nextLocked });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to toggle room lock.");
+      setIsLocked(!nextLocked);
+    }
   };
 
   const handleKickMember = (targetSocketId: string) => {
     socketRef.current?.emit("kick_member", { roomCode, targetSocketId });
   };
 
-  const handleRegenerateCode = () => {
-    socketRef.current?.emit("regenerate_code", { roomCode });
+  const handleRegenerateCode = async () => {
+    try {
+      const res = await regenerateCodeMutation.mutateAsync({ code: roomCode, ownerToken });
+      setRoomCode(res.newCode);
+      setLocation(`/room/${res.newCode}`);
+      toast.info(`Room link regenerated: Code is now ${res.newCode}`);
+      socketRef.current?.emit("regenerate_code", { roomCode });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to regenerate room code.");
+    }
   };
 
-  const handleDeleteRoom = () => {
+  const handleDeleteRoom = async () => {
     if (confirm("Are you sure you want to delete this room? All members will be disconnected.")) {
-      socketRef.current?.emit("delete_room", { roomCode });
+      try {
+        await deleteRoomMutation.mutateAsync({ code: roomCode, ownerToken });
+        toast.warning("Room was deleted.");
+        setInRoom(false);
+        setLocation("/rooms");
+        socketRef.current?.emit("delete_room", { roomCode });
+      } catch (err: any) {
+        toast.error(err.message || "Failed to delete room.");
+      }
     }
   };
 
@@ -435,6 +559,7 @@ export default function SharedRooms() {
                   <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">Live Sync</span>
                 </div>
                 <textarea
+                  id="clipboard-textarea"
                   rows={8}
                   value={clipboardText}
                   onChange={(e) => handleClipboardChange(e.target.value)}
@@ -452,6 +577,7 @@ export default function SharedRooms() {
                   <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">Collaborative Notes</span>
                 </div>
                 <textarea
+                  id="notes-textarea"
                   rows={6}
                   value={notesText}
                   onChange={(e) => handleNotesChange(e.target.value)}
@@ -502,34 +628,44 @@ export default function SharedRooms() {
               <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-xl space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
                   <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" /> Online Members
+                    <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" /> Active Members
                   </h3>
                   <span className="text-xs font-mono bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-bold">
-                    {members.length}
+                    {members.length > 0 ? members.length : 1}
                   </span>
                 </div>
 
                 <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                  {members.map((m) => (
-                    <div key={m.socketId} className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-white/5">
+                  {members.length > 0 ? (
+                    members.map((m) => (
+                      <div key={m.socketId} className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-white/5">
+                        <div className="flex items-center gap-2 truncate">
+                          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                          <span className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{m.name}</span>
+                          {m.isOwner && <span className="text-[10px] bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded font-bold">Owner</span>}
+                        </div>
+
+                        {isOwner && !m.isOwner && (
+                          <Button
+                            onClick={() => handleKickMember(m.socketId)}
+                            variant="ghost"
+                            size="sm"
+                            className="text-rose-600 dark:text-rose-400 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-500/10 h-7 text-xs px-2"
+                          >
+                            Kick
+                          </Button>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-white/5">
                       <div className="flex items-center gap-2 truncate">
                         <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                        <span className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{m.name}</span>
-                        {m.isOwner && <span className="text-[10px] bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded font-bold">Owner</span>}
+                        <span className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{userName || (isOwner ? "Owner" : "Member")}</span>
+                        {isOwner && <span className="text-[10px] bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded font-bold">Owner</span>}
                       </div>
-
-                      {isOwner && !m.isOwner && (
-                        <Button
-                          onClick={() => handleKickMember(m.socketId)}
-                          variant="ghost"
-                          size="sm"
-                          className="text-rose-600 dark:text-rose-400 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-500/10 h-7 text-xs px-2"
-                        >
-                          Kick
-                        </Button>
-                      )}
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
 

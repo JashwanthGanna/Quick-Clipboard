@@ -650,6 +650,55 @@ async function getRoomByCode(code) {
   }
   return room;
 }
+async function updateRoomClipboard(code, text2) {
+  const db = await getDb();
+  if (!db) {
+    const room = memoryRooms.get(code);
+    if (room) room.clipboardText = text2;
+    return;
+  }
+  await db.update(rooms).set({ clipboardText: text2 }).where(eq(rooms.code, code));
+}
+async function updateRoomNotes(code, notes) {
+  const db = await getDb();
+  if (!db) {
+    const room = memoryRooms.get(code);
+    if (room) room.notes = notes;
+    return;
+  }
+  await db.update(rooms).set({ notes }).where(eq(rooms.code, code));
+}
+async function updateRoomLock(code, isLocked) {
+  const db = await getDb();
+  if (!db) {
+    const room = memoryRooms.get(code);
+    if (room) room.isLocked = isLocked ? 1 : 0;
+    return;
+  }
+  await db.update(rooms).set({ isLocked: isLocked ? 1 : 0 }).where(eq(rooms.code, code));
+}
+async function regenerateRoomCode(oldCode) {
+  const room = await getRoomByCode(oldCode);
+  if (!room) throw new Error("Room not found");
+  const newCode = generateNumericCode(6);
+  const db = await getDb();
+  if (!db) {
+    memoryRooms.delete(oldCode);
+    room.code = newCode;
+    memoryRooms.set(newCode, room);
+    return newCode;
+  }
+  await db.update(rooms).set({ code: newCode }).where(eq(rooms.code, oldCode));
+  return newCode;
+}
+async function deleteRoom(code) {
+  const db = await getDb();
+  if (!db) {
+    memoryRooms.delete(code);
+    return;
+  }
+  await db.delete(rooms).where(eq(rooms.code, code));
+}
 async function addRoomFile(options) {
   const db = await getDb();
   if (!db) {
@@ -1534,6 +1583,143 @@ var appRouter = router({
       };
     }),
     /**
+     * Join an existing room
+     */
+    join: publicProcedure.input(
+      z2.object({
+        code: z2.string().min(6).max(6),
+        password: z2.string().optional(),
+        name: z2.string().optional(),
+        ownerToken: z2.string().min(1)
+      })
+    ).mutation(async ({ input }) => {
+      const room = await getRoomByCode(input.code);
+      if (!room) {
+        throw new Error("Room not found or has expired");
+      }
+      if (room.isLocked && room.ownerToken !== input.ownerToken) {
+        throw new Error("Room is locked by owner");
+      }
+      if (room.password && room.password !== input.password) {
+        throw new Error("Incorrect room password");
+      }
+      const isOwner = room.ownerToken === input.ownerToken;
+      return {
+        success: true,
+        room: {
+          code: room.code,
+          name: room.name,
+          isLocked: Boolean(room.isLocked),
+          isOwner,
+          clipboardText: room.clipboardText,
+          notes: room.notes,
+          createdAt: room.createdAt,
+          expiresAt: room.expiresAt
+        }
+      };
+    }),
+    /**
+     * Poll/Fetch room state sync
+     */
+    getSync: publicProcedure.input(
+      z2.object({
+        code: z2.string().min(6).max(6),
+        ownerToken: z2.string().min(1)
+      })
+    ).query(async ({ input }) => {
+      const room = await getRoomByCode(input.code);
+      if (!room) {
+        return { isDeleted: true };
+      }
+      const isOwner = room.ownerToken === input.ownerToken;
+      return {
+        isDeleted: false,
+        code: room.code,
+        name: room.name,
+        isLocked: Boolean(room.isLocked),
+        isOwner,
+        clipboardText: room.clipboardText,
+        notes: room.notes,
+        expiresAt: room.expiresAt
+      };
+    }),
+    /**
+     * Update room clipboard text
+     */
+    updateClipboard: publicProcedure.input(
+      z2.object({
+        code: z2.string().min(6).max(6),
+        text: z2.string()
+      })
+    ).mutation(async ({ input }) => {
+      await updateRoomClipboard(input.code, input.text);
+      return { success: true };
+    }),
+    /**
+     * Update room notes text
+     */
+    updateNotes: publicProcedure.input(
+      z2.object({
+        code: z2.string().min(6).max(6),
+        notes: z2.string()
+      })
+    ).mutation(async ({ input }) => {
+      await updateRoomNotes(input.code, input.notes);
+      return { success: true };
+    }),
+    /**
+     * Toggle lock status
+     */
+    toggleLock: publicProcedure.input(
+      z2.object({
+        code: z2.string().min(6).max(6),
+        isLocked: z2.boolean(),
+        ownerToken: z2.string().min(1)
+      })
+    ).mutation(async ({ input }) => {
+      const room = await getRoomByCode(input.code);
+      if (!room) throw new Error("Room not found");
+      if (room.ownerToken !== input.ownerToken) {
+        throw new Error("Only the room owner can lock/unlock the room");
+      }
+      await updateRoomLock(input.code, input.isLocked);
+      return { success: true, isLocked: input.isLocked };
+    }),
+    /**
+     * Regenerate room code
+     */
+    regenerateCode: publicProcedure.input(
+      z2.object({
+        code: z2.string().min(6).max(6),
+        ownerToken: z2.string().min(1)
+      })
+    ).mutation(async ({ input }) => {
+      const room = await getRoomByCode(input.code);
+      if (!room) throw new Error("Room not found");
+      if (room.ownerToken !== input.ownerToken) {
+        throw new Error("Only the room owner can regenerate the room link");
+      }
+      const newCode = await regenerateRoomCode(input.code);
+      return { newCode };
+    }),
+    /**
+     * Delete room
+     */
+    deleteRoom: publicProcedure.input(
+      z2.object({
+        code: z2.string().min(6).max(6),
+        ownerToken: z2.string().min(1)
+      })
+    ).mutation(async ({ input }) => {
+      const room = await getRoomByCode(input.code);
+      if (!room) return { success: true };
+      if (room.ownerToken !== input.ownerToken) {
+        throw new Error("Only the room owner can delete this room");
+      }
+      await deleteRoom(input.code);
+      return { success: true };
+    }),
+    /**
      * Upload file to room feed
      */
     uploadFile: publicProcedure.input(
@@ -1551,7 +1737,7 @@ var appRouter = router({
       }
       const base64Clean = input.base64Data.replace(/^data:[^;]+;base64,/, "");
       const buffer = Buffer.from(base64Clean, "base64");
-      const saved = await saveUploadedFile(buffer, input.filename);
+      const saved = await saveUploadedFile(buffer, input.filename, input.mimeType);
       const roomFile = await addRoomFile({
         roomCode: input.roomCode,
         originalName: input.filename,
