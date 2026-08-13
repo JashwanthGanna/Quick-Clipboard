@@ -1,4 +1,4 @@
-// api/index.ts
+// server/api.ts
 import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 
@@ -1618,7 +1618,7 @@ async function createContext(opts) {
   };
 }
 
-// api/index.ts
+// server/api.ts
 var app = express();
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -1643,7 +1643,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "quick-clipboard-serverless" });
 });
 app.use(trpcMiddleware);
-var index_default = app;
+var api_default = app;
 export {
-  index_default as default
+  api_default as default
 };
