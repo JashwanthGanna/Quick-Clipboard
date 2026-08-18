@@ -9,10 +9,8 @@ export default function CookieConsent() {
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    // Check if user has already made a choice
     const consent = localStorage.getItem(COOKIE_CONSENT_KEY);
     if (!consent) {
-      // Show banner after a short delay for better UX
       const timer = setTimeout(() => setIsVisible(true), 1500);
       return () => clearTimeout(timer);
     }
@@ -39,24 +37,24 @@ export default function CookieConsent() {
       aria-label="Cookie consent"
       aria-describedby="cookie-consent-description"
     >
-      <div className="max-w-4xl mx-auto bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-black/20 p-6">
+      <div className="max-w-4xl mx-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl p-6 text-slate-900 dark:text-white">
         <div className="flex items-start gap-4">
-          <div className="p-2 bg-purple-500/20 rounded-lg shrink-0 hidden sm:block">
-            <Cookie className="w-5 h-5 text-purple-400" />
+          <div className="p-2 bg-purple-500/10 dark:bg-purple-500/20 rounded-lg shrink-0 hidden sm:block">
+            <Cookie className="w-5 h-5 text-purple-600 dark:text-purple-400" />
           </div>
           <div className="flex-1">
-            <h3 className="text-white font-semibold mb-1">🍪 We value your privacy</h3>
-            <p id="cookie-consent-description" className="text-sm text-slate-400 leading-relaxed">
+            <h3 className="text-slate-900 dark:text-white font-semibold mb-1">🍪 We value your privacy</h3>
+            <p id="cookie-consent-description" className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
               We use essential cookies to ensure Quick Clipboard works properly. We'd also like to use
               analytics cookies to understand how you use our site so we can improve it.{" "}
-              <Link href="/privacy" className="text-purple-400 hover:text-purple-300 underline underline-offset-2">
+              <Link href="/privacy" className="text-purple-600 dark:text-purple-400 hover:underline underline-offset-2 font-medium">
                 Privacy Policy
               </Link>
             </p>
           </div>
           <button
             onClick={handleDecline}
-            className="text-slate-500 hover:text-white transition-colors p-1 shrink-0 sm:hidden"
+            className="text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors p-1 shrink-0 sm:hidden"
             aria-label="Close cookie consent banner"
           >
             <X className="w-4 h-4" />
@@ -72,7 +70,7 @@ export default function CookieConsent() {
           <Button
             onClick={handleDecline}
             variant="outline"
-            className="border-white/10 text-slate-300 hover:text-white hover:bg-white/5 text-sm px-6"
+            className="border-slate-300 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 text-sm px-6"
           >
             Essential Only
           </Button>
