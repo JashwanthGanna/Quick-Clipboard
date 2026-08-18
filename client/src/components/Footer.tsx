@@ -7,8 +7,8 @@ export default function Footer() {
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="relative bg-slate-950 border-t border-white/10" role="contentinfo">
-      <div className="border-b border-white/5">
+    <footer className="relative bg-slate-900 dark:bg-slate-950 border-t border-slate-800 dark:border-white/10 text-slate-100" role="contentinfo">
+      <div className="border-b border-slate-800 dark:border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
             {trustBadges.map((badge) => {
@@ -16,11 +16,11 @@ export default function Footer() {
               return (
                 <div
                   key={badge.id}
-                  className="flex flex-col items-center text-center p-3 rounded-xl bg-white/5 border border-white/5 hover:border-purple-500/30 transition-all duration-300"
+                  className="flex flex-col items-center text-center p-3 rounded-xl bg-slate-800/60 dark:bg-white/5 border border-slate-700 dark:border-white/5 hover:border-purple-500/30 transition-all duration-300"
                 >
                   <Icon className="w-5 h-5 text-purple-400 mb-2" />
                   <span className="text-sm font-semibold text-white">{badge.label}</span>
-                  <span className="text-xs text-slate-400">{badge.description}</span>
+                  <span className="text-xs text-slate-300 dark:text-slate-400">{badge.description}</span>
                 </div>
               );
             })}

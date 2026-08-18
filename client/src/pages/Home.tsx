@@ -252,7 +252,7 @@ export default function Home() {
       <div className="relative z-10">
         {/* PLATFORM NAVIGATION LAUNCHBAR */}
         <div className="pt-24 max-w-6xl mx-auto px-4">
-          <div className="bg-slate-900/80 dark:bg-slate-900/80 bg-white/80 backdrop-blur-xl border border-slate-200 dark:border-white/10 p-4 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3">
+          <div className="bg-white/90 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200 dark:border-white/10 p-4 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3">
             <span className="text-xs uppercase font-mono text-purple-600 dark:text-purple-400 font-bold tracking-wider">Use your own choice</span>
             <div className="flex flex-wrap items-center gap-2">
               <a href="/file-sharing" className="px-3 py-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 text-xs font-semibold border border-purple-500/20 transition">
@@ -309,22 +309,22 @@ export default function Home() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 p-4 bg-slate-900/50 border border-white/5 rounded-lg hover:border-purple-500/30 transition duration-300">
+                          <div className="flex items-center gap-3 p-4 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/5 rounded-lg hover:border-purple-500/30 transition duration-300">
                             <Checkbox
                               id="self-destruct"
                               checked={selfDestructEnabled}
                               onCheckedChange={(checked) =>
                                 setSelfDestructEnabled(checked as boolean)
                               }
-                              className="border-white/20"
+                              className="border-slate-400 dark:border-white/20"
                             />
                             <Label
                               htmlFor="self-destruct"
                               className="flex items-center gap-2 cursor-pointer flex-1"
                             >
-                              <Zap className="w-4 h-4 text-yellow-400" />
-                              <span className="text-white font-medium">Self-Destruct Mode</span>
-                              <span className="text-xs text-slate-400">(Delete after first view)</span>
+                              <Zap className="w-4 h-4 text-amber-500 dark:text-yellow-400" />
+                              <span className="text-slate-900 dark:text-white font-medium">Self-Destruct Mode</span>
+                              <span className="text-xs text-slate-500 dark:text-slate-400">(Delete after first view)</span>
                             </Label>
                           </div>
 
@@ -350,19 +350,19 @@ export default function Home() {
                       ) : (
                         <div className="space-y-4 animate-in fade-in zoom-in duration-500">
                           <div className="p-4 bg-gradient-to-r from-green-500/20 to-emerald-500/20 border border-green-500/30 rounded-lg">
-                            <p className="text-green-300 text-sm font-medium flex items-center gap-2">
+                            <p className="text-emerald-700 dark:text-green-300 text-sm font-medium flex items-center gap-2">
                               <Sparkles className="w-4 h-4" />
                               Shared successfully!
                             </p>
                           </div>
 
-                          <div className="p-4 bg-slate-900/50 border border-white/10 rounded-lg hover:border-purple-500/30 transition duration-300">
-                            <label className="block text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
+                          <div className="p-4 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-lg hover:border-purple-500/30 transition duration-300">
+                            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-3 uppercase tracking-wider">
                               6-Digit Code
                             </label>
                             <div className="flex items-center gap-2">
-                              <div className="flex-1 p-3 bg-slate-800 border border-white/10 rounded-lg">
-                                <code className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent tracking-widest font-mono">
+                              <div className="flex-1 p-3 bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg">
+                                <code className="text-4xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 dark:from-purple-400 dark:to-blue-400 bg-clip-text text-transparent tracking-widest font-mono">
                                   {sharedCode}
                                 </code>
                               </div>
@@ -370,41 +370,41 @@ export default function Home() {
                                 onClick={handleCopyCode}
                                 size="sm"
                                 variant="outline"
-                                className="h-12 w-12 p-0 bg-slate-900/50 border-white/10 hover:border-purple-500/50 hover:bg-purple-500/10 transition duration-300"
+                                className="h-12 w-12 p-0 bg-slate-100 dark:bg-slate-900/50 border-slate-300 dark:border-white/10 hover:border-purple-500/50 hover:bg-purple-500/10 transition duration-300"
                                 aria-label="Copy 6-digit code"
                               >
-                                <Copy className="w-4 h-4 text-purple-400" />
+                                <Copy className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                               </Button>
                             </div>
                           </div>
 
-                          <div className="p-4 bg-slate-900/50 border border-white/10 rounded-lg hover:border-blue-500/30 transition duration-300">
-                            <label className="block text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
+                          <div className="p-4 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-lg hover:border-blue-500/30 transition duration-300">
+                            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-3 uppercase tracking-wider">
                               Share Link
                             </label>
                             <div className="flex items-center gap-2">
                               <Input
                                 value={shareLink}
                                 readOnly
-                                className="text-sm bg-slate-800 border-white/10 text-slate-300"
+                                className="text-sm bg-slate-200 dark:bg-slate-800 border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-300"
                               />
                               <Button
                                 onClick={handleCopyShareLink}
                                 size="sm"
                                 variant="outline"
-                                className="h-10 w-10 p-0 bg-slate-900/50 border-white/10 hover:border-blue-500/50 hover:bg-blue-500/10 transition duration-300"
+                                className="h-10 w-10 p-0 bg-slate-100 dark:bg-slate-900/50 border-slate-300 dark:border-white/10 hover:border-blue-500/50 hover:bg-blue-500/10 transition duration-300"
                                 aria-label="Copy share link"
                               >
-                                <Copy className="w-4 h-4 text-blue-400" />
+                                <Copy className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                               </Button>
                             </div>
                           </div>
 
-                          <div className="p-4 bg-slate-900/50 border border-white/10 rounded-lg flex flex-col items-center gap-3 hover:border-cyan-500/30 transition duration-300">
-                            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                          <div className="p-4 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-lg flex flex-col items-center gap-3 hover:border-cyan-500/30 transition duration-300">
+                            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
                               QR Code
                             </label>
-                            <div ref={qrRef} className="p-3 bg-white rounded-lg">
+                            <div ref={qrRef} className="p-3 bg-white rounded-lg shadow-sm">
                               <QRCode
                                 value={shareLink}
                                 size={160}
@@ -418,22 +418,22 @@ export default function Home() {
                               onClick={handleDownloadQR}
                               size="sm"
                               variant="outline"
-                              className="w-full bg-slate-900/50 border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/10 transition duration-300"
+                              className="w-full bg-slate-100 dark:bg-slate-900/50 border-slate-300 dark:border-white/10 hover:border-cyan-500/50 hover:bg-cyan-500/10 transition duration-300 text-slate-900 dark:text-white"
                               aria-label="Download QR code as PNG image"
                             >
-                              <Download className="w-4 h-4 mr-2 text-cyan-400" />
+                              <Download className="w-4 h-4 mr-2 text-cyan-600 dark:text-cyan-400" />
                               Download QR Code
                             </Button>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
-                            <div className="p-2 bg-slate-900/50 rounded text-center">
-                              <p className="text-xs text-slate-400">Expires In</p>
-                              <p className="text-sm font-semibold text-blue-400">24 hours</p>
+                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-white/10">
+                            <div className="p-2 bg-slate-100 dark:bg-slate-900/50 rounded text-center border border-slate-200 dark:border-white/5">
+                              <p className="text-xs text-slate-600 dark:text-slate-400">Expires In</p>
+                              <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">24 hours</p>
                             </div>
-                            <div className="p-2 bg-slate-900/50 rounded text-center">
-                              <p className="text-xs text-slate-400">Mode</p>
-                              <p className="text-sm font-semibold text-yellow-400">
+                            <div className="p-2 bg-slate-100 dark:bg-slate-900/50 rounded text-center border border-slate-200 dark:border-white/5">
+                              <p className="text-xs text-slate-600 dark:text-slate-400">Mode</p>
+                              <p className="text-sm font-semibold text-amber-600 dark:text-yellow-400">
                                 {selfDestructEnabled ? "Self-Destruct" : "Normal"}
                               </p>
                             </div>
@@ -445,7 +445,7 @@ export default function Home() {
                               setSharedAt(null);
                             }}
                             variant="outline"
-                            className="w-full border-white/10 hover:border-purple-500/50 hover:bg-purple-500/10 text-slate-300 transition duration-300"
+                            className="w-full border-slate-300 dark:border-white/10 hover:border-purple-500/50 hover:bg-purple-500/10 text-slate-700 dark:text-slate-300 transition duration-300"
                           >
                             Share Another
                           </Button>
@@ -531,17 +531,17 @@ export default function Home() {
                             </div>
                           )}
 
-                          <div className="p-4 bg-slate-900/50 border border-white/10 rounded-lg max-h-64 overflow-y-auto">
-                            <p className="text-xs font-semibold text-slate-400 mb-3 uppercase tracking-wider">
+                          <div className="p-4 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-lg max-h-64 overflow-y-auto">
+                            <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-3 uppercase tracking-wider">
                               Content
                             </p>
-                            <p className="text-slate-200 whitespace-pre-wrap break-words">{retrievedContent}</p>
+                            <p className="text-slate-900 dark:text-slate-200 whitespace-pre-wrap break-words">{retrievedContent}</p>
                           </div>
 
                           {retrievedMetadata?.expiresAt && (
-                            <div className="p-3 bg-slate-900/50 border border-white/10 rounded-lg">
-                              <p className="text-xs text-slate-400 flex items-center gap-2">
-                                <Clock className="w-4 h-4 text-orange-400" />
+                            <div className="p-3 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-lg">
+                              <p className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-2">
+                                <Clock className="w-4 h-4 text-amber-500 dark:text-orange-400" />
                                 Expires: {new Date(retrievedMetadata.expiresAt).toLocaleString()}
                               </p>
                             </div>
@@ -567,7 +567,7 @@ export default function Home() {
                               }
                             }}
                             variant="outline"
-                            className="w-full border-white/10 hover:border-blue-500/50 hover:bg-blue-500/10 text-slate-300 transition duration-300"
+                            className="w-full border-slate-300 dark:border-white/10 hover:border-blue-500/50 hover:bg-blue-500/10 text-slate-700 dark:text-slate-300 transition duration-300"
                           >
                             Retrieve Another
                           </Button>
@@ -586,12 +586,12 @@ export default function Home() {
         <section id="features" ref={featuresAnim.ref} className="py-20 lg:py-28">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className={`text-center mb-16 transition-all duration-700 ${featuresAnim.inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}>
-              <span className="inline-block text-sm font-semibold text-purple-400 uppercase tracking-wider mb-3">Features</span>
-              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-4">
+              <span className="inline-block text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-3">Features</span>
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-slate-900 dark:text-white mb-4">
                 Everything You Need,{" "}
-                <span className="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">Nothing You Don't</span>
+                <span className="bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 dark:from-purple-400 dark:to-blue-400 bg-clip-text text-transparent">Nothing You Don't</span>
               </h2>
-              <p className="text-lg text-slate-400 max-w-2xl mx-auto">
+              <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
                 Quick Clipboard is designed to be the simplest, fastest, and most secure way to share text online.
               </p>
             </div>
@@ -606,12 +606,12 @@ export default function Home() {
                     style={{ transitionDelay: `${i * 100}ms` }}
                   >
                     <div className={`absolute inset-0 bg-gradient-to-r ${feature.bgColor} rounded-xl blur-xl opacity-0 group-hover:opacity-60 transition duration-500`}></div>
-                    <Card className={`relative backdrop-blur-xl bg-white/5 border border-white/10 ${feature.borderColor} transition duration-300 p-6 hover:scale-105 transform`}>
+                    <Card className={`relative backdrop-blur-xl bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 ${feature.borderColor} transition duration-300 p-6 hover:scale-105 transform shadow-lg dark:shadow-none`}>
                       <div className={`p-3 ${feature.bgColor} rounded-lg w-fit mb-4`}>
                         <Icon className={`w-6 h-6 ${feature.iconColor}`} />
                       </div>
-                      <h3 className="font-bold text-white mb-2">{feature.title}</h3>
-                      <p className="text-sm text-slate-400 leading-relaxed">{feature.description}</p>
+                      <h3 className="font-bold text-slate-900 dark:text-white mb-2">{feature.title}</h3>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{feature.description}</p>
                     </Card>
                   </div>
                 );
@@ -620,14 +620,14 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="how-it-works" ref={howItWorksAnim.ref} className="py-20 lg:py-28 border-t border-white/5">
+        <section id="how-it-works" ref={howItWorksAnim.ref} className="py-20 lg:py-28 border-t border-slate-200 dark:border-white/5">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className={`text-center mb-16 transition-all duration-700 ${howItWorksAnim.inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}>
-              <span className="inline-block text-sm font-semibold text-blue-400 uppercase tracking-wider mb-3">How It Works</span>
-              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-4">
+              <span className="inline-block text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-3">How It Works</span>
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-slate-900 dark:text-white mb-4">
                 Three Simple Steps
               </h2>
-              <p className="text-lg text-slate-400 max-w-2xl mx-auto">
+              <p className="text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto">
                 Share text across any device in seconds. No accounts, no installations — just pure simplicity.
               </p>
             </div>
@@ -643,18 +643,18 @@ export default function Home() {
                   >
                     <div className="relative inline-flex items-center justify-center w-16 h-16 mb-6">
                       <div className={`absolute inset-0 bg-gradient-to-r ${step.color} rounded-2xl opacity-20`}></div>
-                      <span className="relative text-2xl font-bold text-white">{step.step}</span>
+                      <span className="relative text-2xl font-bold text-slate-900 dark:text-white">{step.step}</span>
                     </div>
 
                     <div className={`inline-flex p-3 bg-gradient-to-r ${step.color} rounded-xl mb-4`}>
                       <Icon className="w-6 h-6 text-white" />
                     </div>
 
-                    <h3 className="text-xl font-bold text-white mb-3">{step.title}</h3>
-                    <p className="text-slate-400 leading-relaxed">{step.description}</p>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-3">{step.title}</h3>
+                    <p className="text-slate-600 dark:text-slate-400 leading-relaxed">{step.description}</p>
 
                     {i < howItWorksSteps.length - 1 && (
-                      <div className="hidden md:block absolute top-8 right-0 w-1/2 h-px bg-gradient-to-r from-white/10 to-transparent translate-x-full"></div>
+                      <div className="hidden md:block absolute top-8 right-0 w-1/2 h-px bg-gradient-to-r from-slate-300 dark:from-white/10 to-transparent translate-x-full"></div>
                     )}
                   </div>
                 );
@@ -665,16 +665,14 @@ export default function Home() {
 
         <AdSlot format="rectangle" className="my-4 max-w-6xl mx-auto px-4" />
 
-
-
-        <section id="faq" ref={faqAnim.ref} className="py-20 lg:py-28 border-t border-white/5">
+        <section id="faq" ref={faqAnim.ref} className="py-20 lg:py-28 border-t border-slate-200 dark:border-white/5">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className={`text-center mb-16 transition-all duration-700 ${faqAnim.inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}>
-              <span className="inline-block text-sm font-semibold text-green-400 uppercase tracking-wider mb-3">FAQ</span>
-              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-4">
+              <span className="inline-block text-sm font-semibold text-emerald-600 dark:text-green-400 uppercase tracking-wider mb-3">FAQ</span>
+              <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-slate-900 dark:text-white mb-4">
                 Frequently Asked Questions
               </h2>
-              <p className="text-lg text-slate-400">
+              <p className="text-lg text-slate-600 dark:text-slate-400">
                 Have questions? We've got answers.
               </p>
             </div>
@@ -688,12 +686,12 @@ export default function Home() {
                 <AccordionItem
                   key={item.id}
                   value={item.id}
-                  className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-xl px-6 hover:border-green-500/30 transition-colors duration-300 data-[state=open]:border-green-500/30"
+                  className="backdrop-blur-xl bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-6 hover:border-green-500/30 transition-colors duration-300 data-[state=open]:border-green-500/30 shadow-md dark:shadow-none"
                 >
-                  <AccordionTrigger className="text-left text-white font-medium py-5 hover:no-underline">
+                  <AccordionTrigger className="text-left text-slate-900 dark:text-white font-medium py-5 hover:no-underline">
                     {item.question}
                   </AccordionTrigger>
-                  <AccordionContent className="text-slate-400 pb-5 leading-relaxed">
+                  <AccordionContent className="text-slate-600 dark:text-slate-400 pb-5 leading-relaxed">
                     {item.answer}
                   </AccordionContent>
                 </AccordionItem>
