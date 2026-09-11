@@ -13,6 +13,17 @@ import {
 import { ENV } from "./_core/env";
 
 import type { Clipboard, SharedFile, SharedRoom, RoomFile } from "../drizzle/schema";
+import {
+  saveFirebaseRoom,
+  getFirebaseRoomByCode,
+  updateFirebaseRoomClipboard,
+  updateFirebaseRoomNotes,
+  updateFirebaseRoomLock,
+  regenerateFirebaseRoomCode,
+  deleteFirebaseRoom,
+  addFirebaseRoomFile,
+  getFirebaseRoomFiles,
+} from "./firebase";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -590,6 +601,11 @@ export async function createRoom(options: {
     memoryRooms.set(code, room);
     globalStats.roomsCreatedCount++;
     saveTempStorage();
+
+    if (options.expiryOption === "never" || expiresAt === null) {
+      await saveFirebaseRoom(room);
+    }
+
     return { code, room };
   }
 
@@ -615,29 +631,63 @@ export async function createRoom(options: {
   await db.insert(rooms).values(roomValues);
   globalStats.roomsCreatedCount++;
   const created = await getRoomByCode(code);
+
+  if ((options.expiryOption === "never" || expiresAt === null) && created) {
+    await saveFirebaseRoom(created);
+  }
+
   return { code, room: created! };
 }
 
 export async function getRoomByCode(code: string): Promise<SharedRoom | null> {
   const db = await getDb();
+  let room: SharedRoom | null = null;
+
   if (!db) {
-    const room = memoryRooms.get(code);
-    if (!room) return null;
-    if (room.expiresAt && new Date() > new Date(room.expiresAt)) {
-      memoryRooms.delete(code);
-      saveTempStorage();
-      return null;
+    const memRoom = memoryRooms.get(code);
+    if (memRoom) {
+      if (memRoom.expiresAt && new Date() > new Date(memRoom.expiresAt)) {
+        memoryRooms.delete(code);
+        saveTempStorage();
+      } else {
+        room = memRoom;
+      }
     }
-    return room;
+  } else {
+    const result = await db.select().from(rooms).where(eq(rooms.code, code)).limit(1);
+    if (result.length > 0) {
+      const dbRoom = result[0];
+      if (dbRoom.expiresAt && new Date() > new Date(dbRoom.expiresAt)) {
+        await db.delete(rooms).where(eq(rooms.code, code));
+      } else {
+        room = dbRoom;
+      }
+    }
   }
 
-  const result = await db.select().from(rooms).where(eq(rooms.code, code)).limit(1);
-  if (result.length === 0) return null;
-  const room = result[0];
-  if (room.expiresAt && new Date() > new Date(room.expiresAt)) {
-    await db.delete(rooms).where(eq(rooms.code, code));
+  if (!room) {
+    // Check Firebase Firestore for permanent "Never Expire" rooms
+    const fbRoom = await getFirebaseRoomByCode(code);
+    if (fbRoom) {
+      const createdRoom: InMemoryRoom = {
+        id: Math.floor(Math.random() * 100000),
+        code: fbRoom.code,
+        name: fbRoom.name,
+        password: fbRoom.password || null,
+        isLocked: fbRoom.isLocked ? 1 : 0,
+        ownerToken: fbRoom.ownerToken,
+        clipboardText: fbRoom.clipboardText || "",
+        notes: fbRoom.notes || "",
+        createdAt: new Date(fbRoom.createdAt),
+        expiresAt: null,
+      };
+      memoryRooms.set(code, createdRoom);
+      saveTempStorage();
+      return createdRoom;
+    }
     return null;
   }
+
   return room;
 }
 
@@ -647,9 +697,10 @@ export async function updateRoomClipboard(code: string, text: string): Promise<v
     const room = memoryRooms.get(code);
     if (room) room.clipboardText = text;
     saveTempStorage();
-    return;
+  } else {
+    await db.update(rooms).set({ clipboardText: text }).where(eq(rooms.code, code));
   }
-  await db.update(rooms).set({ clipboardText: text }).where(eq(rooms.code, code));
+  await updateFirebaseRoomClipboard(code, text);
 }
 
 export async function updateRoomNotes(code: string, notes: string): Promise<void> {
@@ -658,9 +709,10 @@ export async function updateRoomNotes(code: string, notes: string): Promise<void
     const room = memoryRooms.get(code);
     if (room) room.notes = notes;
     saveTempStorage();
-    return;
+  } else {
+    await db.update(rooms).set({ notes: notes }).where(eq(rooms.code, code));
   }
-  await db.update(rooms).set({ notes: notes }).where(eq(rooms.code, code));
+  await updateFirebaseRoomNotes(code, notes);
 }
 
 export async function updateRoomLock(code: string, isLocked: boolean): Promise<void> {
@@ -669,9 +721,10 @@ export async function updateRoomLock(code: string, isLocked: boolean): Promise<v
     const room = memoryRooms.get(code);
     if (room) room.isLocked = isLocked ? 1 : 0;
     saveTempStorage();
-    return;
+  } else {
+    await db.update(rooms).set({ isLocked: isLocked ? 1 : 0 }).where(eq(rooms.code, code));
   }
-  await db.update(rooms).set({ isLocked: isLocked ? 1 : 0 }).where(eq(rooms.code, code));
+  await updateFirebaseRoomLock(code, isLocked);
 }
 
 export async function regenerateRoomCode(oldCode: string): Promise<string> {
@@ -685,10 +738,11 @@ export async function regenerateRoomCode(oldCode: string): Promise<string> {
     room.code = newCode;
     memoryRooms.set(newCode, room as InMemoryRoom);
     saveTempStorage();
-    return newCode;
+  } else {
+    await db.update(rooms).set({ code: newCode }).where(eq(rooms.code, oldCode));
   }
 
-  await db.update(rooms).set({ code: newCode }).where(eq(rooms.code, oldCode));
+  await regenerateFirebaseRoomCode(oldCode, newCode);
   return newCode;
 }
 
@@ -697,9 +751,10 @@ export async function deleteRoom(code: string): Promise<void> {
   if (!db) {
     memoryRooms.delete(code);
     saveTempStorage();
-    return;
+  } else {
+    await db.delete(rooms).where(eq(rooms.code, code));
   }
-  await db.delete(rooms).where(eq(rooms.code, code));
+  await deleteFirebaseRoom(code);
 }
 
 export async function addRoomFile(options: {
@@ -710,8 +765,10 @@ export async function addRoomFile(options: {
   filePath: string;
 }): Promise<RoomFile> {
   const db = await getDb();
+  let item: RoomFile;
+
   if (!db) {
-    const item: InMemoryRoomFile = {
+    const memItem: InMemoryRoomFile = {
       id: memoryRoomFileIdCounter++,
       roomCode: options.roomCode,
       originalName: options.originalName,
@@ -720,26 +777,57 @@ export async function addRoomFile(options: {
       filePath: options.filePath,
       createdAt: new Date(),
     };
-    memoryRoomFiles.set(item.id, item);
+    memoryRoomFiles.set(memItem.id, memItem);
     saveTempStorage();
-    return item;
+    item = memItem;
+  } else {
+    await db.insert(roomFiles).values(options);
+    const res = await db
+      .select()
+      .from(roomFiles)
+      .where(eq(roomFiles.roomCode, options.roomCode))
+      .orderBy(roomFiles.createdAt);
+    item = res[res.length - 1];
   }
 
-  await db.insert(roomFiles).values(options);
-  const res = await db
-    .select()
-    .from(roomFiles)
-    .where(eq(roomFiles.roomCode, options.roomCode))
-    .orderBy(roomFiles.createdAt);
-  return res[res.length - 1];
+  await addFirebaseRoomFile({
+    roomCode: options.roomCode,
+    originalName: options.originalName,
+    mimeType: options.mimeType,
+    fileSize: options.fileSize,
+    filePath: options.filePath,
+    createdAt: new Date().toISOString(),
+  });
+
+  return item;
 }
 
 export async function getRoomFiles(roomCode: string): Promise<RoomFile[]> {
   const db = await getDb();
+  let filesList: RoomFile[] = [];
+
   if (!db) {
-    return Array.from(memoryRoomFiles.values()).filter((f) => f.roomCode === roomCode);
+    filesList = Array.from(memoryRoomFiles.values()).filter((f) => f.roomCode === roomCode);
+  } else {
+    filesList = await db.select().from(roomFiles).where(eq(roomFiles.roomCode, roomCode));
   }
-  return await db.select().from(roomFiles).where(eq(roomFiles.roomCode, roomCode));
+
+  if (filesList.length === 0) {
+    const fbFiles = await getFirebaseRoomFiles(roomCode);
+    if (fbFiles.length > 0) {
+      return fbFiles.map((f, idx) => ({
+        id: typeof f.id === "number" ? f.id : idx + 1000,
+        roomCode: f.roomCode,
+        originalName: f.originalName,
+        mimeType: f.mimeType,
+        fileSize: f.fileSize,
+        filePath: f.filePath,
+        createdAt: new Date(f.createdAt),
+      }));
+    }
+  }
+
+  return filesList;
 }
 
 // STATS & ANALYTICS

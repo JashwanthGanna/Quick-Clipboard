@@ -144,9 +144,192 @@ var ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? ""
 };
 
-// server/db.ts
+// server/firebase.ts
+import { initializeApp, cert, getApps } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
 import path from "path";
+var db = null;
+var isInitialized = false;
+function initFirebase() {
+  if (isInitialized) return db;
+  isInitialized = true;
+  try {
+    if (getApps().length > 0) {
+      db = getFirestore();
+      return db;
+    }
+    let serviceAccount = null;
+    const envKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (envKey) {
+      try {
+        serviceAccount = JSON.parse(envKey);
+      } catch {
+        if (fs.existsSync(envKey)) {
+          serviceAccount = JSON.parse(fs.readFileSync(envKey, "utf-8"));
+        }
+      }
+    }
+    if (!serviceAccount) {
+      const possiblePaths = [
+        path.join(process.cwd(), "serviceAccountKey.json"),
+        path.join(process.cwd(), "serviceAccount.json"),
+        path.join(process.cwd(), "firebase-key.json")
+      ];
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          try {
+            const content = fs.readFileSync(p, "utf-8");
+            serviceAccount = JSON.parse(content);
+            console.log(`[Firebase] Loaded service account credentials from ${p}`);
+            break;
+          } catch (e) {
+            console.warn(`[Firebase] Failed to parse credentials at ${p}:`, e);
+          }
+        }
+      }
+    }
+    if (serviceAccount) {
+      initializeApp({
+        credential: cert(serviceAccount)
+      });
+      db = getFirestore();
+      console.log("[Firebase] Firestore initialized successfully for permanent rooms.");
+    } else {
+      console.warn(
+        "[Firebase] Service account credentials not found. 'Never Expire' rooms will fall back to local persistent cache until serviceAccountKey.json is placed in the project root."
+      );
+    }
+  } catch (err) {
+    console.error("[Firebase] Initialization error:", err);
+    db = null;
+  }
+  return db;
+}
+function getFirestoreDb() {
+  return initFirebase();
+}
+async function saveFirebaseRoom(room) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return;
+  try {
+    const data = {
+      code: room.code,
+      name: room.name,
+      password: room.password || null,
+      isLocked: Boolean(room.isLocked),
+      ownerToken: room.ownerToken,
+      clipboardText: room.clipboardText,
+      notes: room.notes,
+      createdAt: room.createdAt ? new Date(room.createdAt).toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
+      expiresAt: null
+    };
+    await fdb.collection("never_expire_rooms").doc(room.code).set(data);
+  } catch (err) {
+    console.error("[Firebase] Failed to save room to Firestore:", err);
+  }
+}
+async function getFirebaseRoomByCode(code) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return null;
+  try {
+    const doc = await fdb.collection("never_expire_rooms").doc(code).get();
+    if (!doc.exists) return null;
+    return doc.data();
+  } catch (err) {
+    console.error("[Firebase] Failed to get room from Firestore:", err);
+    return null;
+  }
+}
+async function updateFirebaseRoomClipboard(code, text2) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return;
+  try {
+    await fdb.collection("never_expire_rooms").doc(code).update({
+      clipboardText: text2
+    });
+  } catch (err) {
+  }
+}
+async function updateFirebaseRoomNotes(code, notes) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return;
+  try {
+    await fdb.collection("never_expire_rooms").doc(code).update({
+      notes
+    });
+  } catch (err) {
+  }
+}
+async function updateFirebaseRoomLock(code, isLocked) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return;
+  try {
+    await fdb.collection("never_expire_rooms").doc(code).update({
+      isLocked: Boolean(isLocked)
+    });
+  } catch (err) {
+  }
+}
+async function regenerateFirebaseRoomCode(oldCode, newCode) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return;
+  try {
+    const doc = await fdb.collection("never_expire_rooms").doc(oldCode).get();
+    if (doc.exists) {
+      const data = doc.data();
+      data.code = newCode;
+      await fdb.collection("never_expire_rooms").doc(newCode).set(data);
+      await fdb.collection("never_expire_rooms").doc(oldCode).delete();
+    }
+  } catch (err) {
+    console.error("[Firebase] Failed to regenerate room code in Firestore:", err);
+  }
+}
+async function deleteFirebaseRoom(code) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return;
+  try {
+    await fdb.collection("never_expire_rooms").doc(code).delete();
+  } catch (err) {
+    console.error("[Firebase] Failed to delete room from Firestore:", err);
+  }
+}
+async function addFirebaseRoomFile(file) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return;
+  try {
+    await fdb.collection("never_expire_room_files").add({
+      ...file,
+      createdAt: file.createdAt || (/* @__PURE__ */ new Date()).toISOString()
+    });
+  } catch (err) {
+    console.error("[Firebase] Failed to add room file to Firestore:", err);
+  }
+}
+async function getFirebaseRoomFiles(roomCode) {
+  const fdb = getFirestoreDb();
+  if (!fdb) return [];
+  try {
+    const snapshot = await fdb.collection("never_expire_room_files").where("roomCode", "==", roomCode).get();
+    const result = [];
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      result.push({
+        ...data,
+        id: doc.id
+      });
+    });
+    return result;
+  } catch (err) {
+    console.error("[Firebase] Failed to get room files from Firestore:", err);
+    return [];
+  }
+}
+
+// server/db.ts
+import fs2 from "fs";
+import path2 from "path";
 import os from "os";
 var _db = null;
 async function getDb() {
@@ -164,8 +347,8 @@ async function upsertUser(user) {
   if (!user.openId) {
     throw new Error("User openId is required for upsert");
   }
-  const db = await getDb();
-  if (!db) {
+  const db2 = await getDb();
+  if (!db2) {
     console.warn("[Database] Cannot upsert user: database not available");
     return;
   }
@@ -200,7 +383,7 @@ async function upsertUser(user) {
     if (Object.keys(updateSet).length === 0) {
       updateSet.lastSignedIn = /* @__PURE__ */ new Date();
     }
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
+    await db2.insert(users).values(values).onDuplicateKeyUpdate({
       set: updateSet
     });
   } catch (error) {
@@ -209,9 +392,9 @@ async function upsertUser(user) {
   }
 }
 async function getUserByOpenId(openId) {
-  const db = await getDb();
-  if (!db) return void 0;
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  const db2 = await getDb();
+  if (!db2) return void 0;
+  const result = await db2.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : void 0;
 }
 var memoryClipboards = /* @__PURE__ */ new Map();
@@ -222,11 +405,11 @@ var memoryClipboardIdCounter = 1;
 var memoryFileIdCounter = 1;
 var memoryRoomIdCounter = 1;
 var memoryRoomFileIdCounter = 1;
-var TEMP_STORAGE_FILE = path.join(os.tmpdir(), "qc_storage_cache.json");
+var TEMP_STORAGE_FILE = path2.join(os.tmpdir(), "qc_storage_cache.json");
 function loadTempStorage() {
   try {
-    if (fs.existsSync(TEMP_STORAGE_FILE)) {
-      const raw = fs.readFileSync(TEMP_STORAGE_FILE, "utf-8");
+    if (fs2.existsSync(TEMP_STORAGE_FILE)) {
+      const raw = fs2.readFileSync(TEMP_STORAGE_FILE, "utf-8");
       const data = JSON.parse(raw);
       if (data && data.clipboards) {
         Object.entries(data.clipboards).forEach(([code, item]) => {
@@ -260,7 +443,7 @@ function saveTempStorage() {
       rooms: Object.fromEntries(memoryRooms),
       roomFiles: Object.fromEntries(memoryRoomFiles)
     };
-    fs.writeFileSync(TEMP_STORAGE_FILE, JSON.stringify(data), "utf-8");
+    fs2.writeFileSync(TEMP_STORAGE_FILE, JSON.stringify(data), "utf-8");
   } catch (err) {
   }
 }
@@ -300,17 +483,17 @@ async function createClipboard(options) {
   let code;
   let attempts = 0;
   try {
-    const db = await getDb();
-    if (db) {
+    const db2 = await getDb();
+    if (db2) {
       let isUnique = false;
       do {
         code = generateNumericCode(6);
-        const existing = await db.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
+        const existing = await db2.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
         isUnique = existing.length === 0;
         attempts++;
       } while (!isUnique && attempts < 100);
       if (isUnique) {
-        await db.insert(clipboards).values({
+        await db2.insert(clipboards).values({
           code,
           content: options.content,
           selfDestruct,
@@ -380,13 +563,13 @@ function isExpired(expiresAt) {
 async function getClipboardByCode(code) {
   loadTempStorage();
   try {
-    const db = await getDb();
-    if (db) {
-      const result = await db.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
+    const db2 = await getDb();
+    if (db2) {
+      const result = await db2.select().from(clipboards).where(eq(clipboards.code, code)).limit(1);
       if (result.length > 0) {
         const clipboard2 = result[0];
         if (isExpired(clipboard2.expiresAt)) {
-          await db.delete(clipboards).where(eq(clipboards.code, code));
+          await db2.delete(clipboards).where(eq(clipboards.code, code));
           memoryClipboards.delete(code);
           saveTempStorage();
           return null;
@@ -407,8 +590,8 @@ async function getClipboardByCode(code) {
   return clipboard;
 }
 async function markClipboardAsViewed(code) {
-  const db = await getDb();
-  if (!db) {
+  const db2 = await getDb();
+  if (!db2) {
     const clipboard2 = memoryClipboards.get(code);
     if (!clipboard2) return false;
     clipboard2.viewCount++;
@@ -438,9 +621,9 @@ async function markClipboardAsViewed(code) {
     }
   }
   if (shouldDelete) {
-    await db.delete(clipboards).where(eq(clipboards.code, code));
+    await db2.delete(clipboards).where(eq(clipboards.code, code));
   } else {
-    await db.update(clipboards).set({ viewCount: newViewCount, viewed: 1 }).where(eq(clipboards.code, code));
+    await db2.update(clipboards).set({ viewCount: newViewCount, viewed: 1 }).where(eq(clipboards.code, code));
   }
   return shouldDelete;
 }
@@ -452,17 +635,17 @@ async function createFile(options) {
   let code;
   let attempts = 0;
   try {
-    const db = await getDb();
-    if (db) {
+    const db2 = await getDb();
+    if (db2) {
       let isUnique = false;
       do {
         code = generateNumericCode(6);
-        const existing = await db.select().from(files).where(eq(files.code, code)).limit(1);
+        const existing = await db2.select().from(files).where(eq(files.code, code)).limit(1);
         isUnique = existing.length === 0;
         attempts++;
       } while (!isUnique && attempts < 100);
       if (isUnique) {
-        await db.insert(files).values({
+        await db2.insert(files).values({
           code,
           originalName: options.originalName,
           mimeType: options.mimeType,
@@ -532,13 +715,13 @@ async function createFile(options) {
 async function getFileByCode(code) {
   loadTempStorage();
   try {
-    const db = await getDb();
-    if (db) {
-      const result = await db.select().from(files).where(eq(files.code, code)).limit(1);
+    const db2 = await getDb();
+    if (db2) {
+      const result = await db2.select().from(files).where(eq(files.code, code)).limit(1);
       if (result.length > 0) {
         const file2 = result[0];
         if (isExpired(file2.expiresAt)) {
-          await db.delete(files).where(eq(files.code, code));
+          await db2.delete(files).where(eq(files.code, code));
           memoryFiles.delete(code);
           saveTempStorage();
           return null;
@@ -559,8 +742,8 @@ async function getFileByCode(code) {
   return file;
 }
 async function registerFileDownload(code) {
-  const db = await getDb();
-  if (!db) {
+  const db2 = await getDb();
+  if (!db2) {
     const file2 = memoryFiles.get(code);
     if (!file2) return false;
     file2.downloadCount++;
@@ -589,18 +772,18 @@ async function registerFileDownload(code) {
     }
   }
   if (shouldDelete) {
-    await db.delete(files).where(eq(files.code, code));
+    await db2.delete(files).where(eq(files.code, code));
   } else {
-    await db.update(files).set({ downloadCount: newDownloadCount }).where(eq(files.code, code));
+    await db2.update(files).set({ downloadCount: newDownloadCount }).where(eq(files.code, code));
   }
   return shouldDelete;
 }
 async function createRoom(options) {
   const expiresAt = parseExpiryOption(options.expiryOption || "24h");
-  const db = await getDb();
+  const db2 = await getDb();
   let code;
   let attempts = 0;
-  if (!db) {
+  if (!db2) {
     do {
       code = generateNumericCode(6);
       attempts++;
@@ -620,12 +803,15 @@ async function createRoom(options) {
     memoryRooms.set(code, room);
     globalStats.roomsCreatedCount++;
     saveTempStorage();
+    if (options.expiryOption === "never" || expiresAt === null) {
+      await saveFirebaseRoom(room);
+    }
     return { code, room };
   }
   let isUnique = false;
   do {
     code = generateNumericCode(6);
-    const existing = await db.select().from(rooms).where(eq(rooms.code, code)).limit(1);
+    const existing = await db2.select().from(rooms).where(eq(rooms.code, code)).limit(1);
     isUnique = existing.length === 0;
     attempts++;
   } while (!isUnique && attempts < 100);
@@ -639,90 +825,125 @@ async function createRoom(options) {
     notes: "Shared Notes Scratchpad:\n- Add meeting points\n- Paste quick code snippets",
     expiresAt
   };
-  await db.insert(rooms).values(roomValues);
+  await db2.insert(rooms).values(roomValues);
   globalStats.roomsCreatedCount++;
   const created = await getRoomByCode(code);
+  if ((options.expiryOption === "never" || expiresAt === null) && created) {
+    await saveFirebaseRoom(created);
+  }
   return { code, room: created };
 }
 async function getRoomByCode(code) {
-  const db = await getDb();
-  if (!db) {
-    const room2 = memoryRooms.get(code);
-    if (!room2) return null;
-    if (room2.expiresAt && /* @__PURE__ */ new Date() > new Date(room2.expiresAt)) {
-      memoryRooms.delete(code);
-      saveTempStorage();
-      return null;
+  const db2 = await getDb();
+  let room = null;
+  if (!db2) {
+    const memRoom = memoryRooms.get(code);
+    if (memRoom) {
+      if (memRoom.expiresAt && /* @__PURE__ */ new Date() > new Date(memRoom.expiresAt)) {
+        memoryRooms.delete(code);
+        saveTempStorage();
+      } else {
+        room = memRoom;
+      }
     }
-    return room2;
+  } else {
+    const result = await db2.select().from(rooms).where(eq(rooms.code, code)).limit(1);
+    if (result.length > 0) {
+      const dbRoom = result[0];
+      if (dbRoom.expiresAt && /* @__PURE__ */ new Date() > new Date(dbRoom.expiresAt)) {
+        await db2.delete(rooms).where(eq(rooms.code, code));
+      } else {
+        room = dbRoom;
+      }
+    }
   }
-  const result = await db.select().from(rooms).where(eq(rooms.code, code)).limit(1);
-  if (result.length === 0) return null;
-  const room = result[0];
-  if (room.expiresAt && /* @__PURE__ */ new Date() > new Date(room.expiresAt)) {
-    await db.delete(rooms).where(eq(rooms.code, code));
+  if (!room) {
+    const fbRoom = await getFirebaseRoomByCode(code);
+    if (fbRoom) {
+      const createdRoom = {
+        id: Math.floor(Math.random() * 1e5),
+        code: fbRoom.code,
+        name: fbRoom.name,
+        password: fbRoom.password || null,
+        isLocked: fbRoom.isLocked ? 1 : 0,
+        ownerToken: fbRoom.ownerToken,
+        clipboardText: fbRoom.clipboardText || "",
+        notes: fbRoom.notes || "",
+        createdAt: new Date(fbRoom.createdAt),
+        expiresAt: null
+      };
+      memoryRooms.set(code, createdRoom);
+      saveTempStorage();
+      return createdRoom;
+    }
     return null;
   }
   return room;
 }
 async function updateRoomClipboard(code, text2) {
-  const db = await getDb();
-  if (!db) {
+  const db2 = await getDb();
+  if (!db2) {
     const room = memoryRooms.get(code);
     if (room) room.clipboardText = text2;
     saveTempStorage();
-    return;
+  } else {
+    await db2.update(rooms).set({ clipboardText: text2 }).where(eq(rooms.code, code));
   }
-  await db.update(rooms).set({ clipboardText: text2 }).where(eq(rooms.code, code));
+  await updateFirebaseRoomClipboard(code, text2);
 }
 async function updateRoomNotes(code, notes) {
-  const db = await getDb();
-  if (!db) {
+  const db2 = await getDb();
+  if (!db2) {
     const room = memoryRooms.get(code);
     if (room) room.notes = notes;
     saveTempStorage();
-    return;
+  } else {
+    await db2.update(rooms).set({ notes }).where(eq(rooms.code, code));
   }
-  await db.update(rooms).set({ notes }).where(eq(rooms.code, code));
+  await updateFirebaseRoomNotes(code, notes);
 }
 async function updateRoomLock(code, isLocked) {
-  const db = await getDb();
-  if (!db) {
+  const db2 = await getDb();
+  if (!db2) {
     const room = memoryRooms.get(code);
     if (room) room.isLocked = isLocked ? 1 : 0;
     saveTempStorage();
-    return;
+  } else {
+    await db2.update(rooms).set({ isLocked: isLocked ? 1 : 0 }).where(eq(rooms.code, code));
   }
-  await db.update(rooms).set({ isLocked: isLocked ? 1 : 0 }).where(eq(rooms.code, code));
+  await updateFirebaseRoomLock(code, isLocked);
 }
 async function regenerateRoomCode(oldCode) {
   const room = await getRoomByCode(oldCode);
   if (!room) throw new Error("Room not found");
   const newCode = generateNumericCode(6);
-  const db = await getDb();
-  if (!db) {
+  const db2 = await getDb();
+  if (!db2) {
     memoryRooms.delete(oldCode);
     room.code = newCode;
     memoryRooms.set(newCode, room);
     saveTempStorage();
-    return newCode;
+  } else {
+    await db2.update(rooms).set({ code: newCode }).where(eq(rooms.code, oldCode));
   }
-  await db.update(rooms).set({ code: newCode }).where(eq(rooms.code, oldCode));
+  await regenerateFirebaseRoomCode(oldCode, newCode);
   return newCode;
 }
 async function deleteRoom(code) {
-  const db = await getDb();
-  if (!db) {
+  const db2 = await getDb();
+  if (!db2) {
     memoryRooms.delete(code);
     saveTempStorage();
-    return;
+  } else {
+    await db2.delete(rooms).where(eq(rooms.code, code));
   }
-  await db.delete(rooms).where(eq(rooms.code, code));
+  await deleteFirebaseRoom(code);
 }
 async function addRoomFile(options) {
-  const db = await getDb();
-  if (!db) {
-    const item = {
+  const db2 = await getDb();
+  let item;
+  if (!db2) {
+    const memItem = {
       id: memoryRoomFileIdCounter++,
       roomCode: options.roomCode,
       originalName: options.originalName,
@@ -731,20 +952,47 @@ async function addRoomFile(options) {
       filePath: options.filePath,
       createdAt: /* @__PURE__ */ new Date()
     };
-    memoryRoomFiles.set(item.id, item);
+    memoryRoomFiles.set(memItem.id, memItem);
     saveTempStorage();
-    return item;
+    item = memItem;
+  } else {
+    await db2.insert(roomFiles).values(options);
+    const res = await db2.select().from(roomFiles).where(eq(roomFiles.roomCode, options.roomCode)).orderBy(roomFiles.createdAt);
+    item = res[res.length - 1];
   }
-  await db.insert(roomFiles).values(options);
-  const res = await db.select().from(roomFiles).where(eq(roomFiles.roomCode, options.roomCode)).orderBy(roomFiles.createdAt);
-  return res[res.length - 1];
+  await addFirebaseRoomFile({
+    roomCode: options.roomCode,
+    originalName: options.originalName,
+    mimeType: options.mimeType,
+    fileSize: options.fileSize,
+    filePath: options.filePath,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
+  return item;
 }
 async function getRoomFiles(roomCode) {
-  const db = await getDb();
-  if (!db) {
-    return Array.from(memoryRoomFiles.values()).filter((f) => f.roomCode === roomCode);
+  const db2 = await getDb();
+  let filesList = [];
+  if (!db2) {
+    filesList = Array.from(memoryRoomFiles.values()).filter((f) => f.roomCode === roomCode);
+  } else {
+    filesList = await db2.select().from(roomFiles).where(eq(roomFiles.roomCode, roomCode));
   }
-  return await db.select().from(roomFiles).where(eq(roomFiles.roomCode, roomCode));
+  if (filesList.length === 0) {
+    const fbFiles = await getFirebaseRoomFiles(roomCode);
+    if (fbFiles.length > 0) {
+      return fbFiles.map((f, idx) => ({
+        id: typeof f.id === "number" ? f.id : idx + 1e3,
+        roomCode: f.roomCode,
+        originalName: f.originalName,
+        mimeType: f.mimeType,
+        fileSize: f.fileSize,
+        filePath: f.filePath,
+        createdAt: new Date(f.createdAt)
+      }));
+    }
+  }
+  return filesList;
 }
 function incrementStat(stat) {
   if (globalStats[stat] !== void 0) {
@@ -755,9 +1003,9 @@ async function getStatsOverview() {
   return { ...globalStats };
 }
 async function createContactSubmission(data) {
-  const db = await getDb();
-  if (!db) return;
-  await db.insert(contactSubmissions).values(data);
+  const db2 = await getDb();
+  if (!db2) return;
+  await db2.insert(contactSubmissions).values(data);
 }
 
 // server/_core/cookies.ts
@@ -1270,20 +1518,20 @@ var systemRouter = router({
 import { z as z2 } from "zod";
 
 // server/fileStorage.ts
-import fs2 from "fs";
-import path2 from "path";
+import fs3 from "fs";
+import path3 from "path";
 import crypto from "crypto";
 import os2 from "os";
 var isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-var UPLOAD_DIR = isVercel ? path2.join(os2.tmpdir(), "uploads") : path2.join(process.cwd(), "uploads");
+var UPLOAD_DIR = isVercel ? path3.join(os2.tmpdir(), "uploads") : path3.join(process.cwd(), "uploads");
 try {
-  if (!fs2.existsSync(UPLOAD_DIR)) {
-    fs2.mkdirSync(UPLOAD_DIR, { recursive: true });
+  if (!fs3.existsSync(UPLOAD_DIR)) {
+    fs3.mkdirSync(UPLOAD_DIR, { recursive: true });
   }
 } catch (e) {
-  const fallbackDir = path2.join(os2.tmpdir(), "uploads");
-  if (!fs2.existsSync(fallbackDir)) {
-    fs2.mkdirSync(fallbackDir, { recursive: true });
+  const fallbackDir = path3.join(os2.tmpdir(), "uploads");
+  if (!fs3.existsSync(fallbackDir)) {
+    fs3.mkdirSync(fallbackDir, { recursive: true });
   }
 }
 var ALLOWED_EXTENSIONS = [
@@ -1303,7 +1551,7 @@ var ALLOWED_EXTENSIONS = [
 ];
 var MAX_FILE_SIZE = 50 * 1024 * 1024;
 function validateFileTypeAndSize(filename, fileSize) {
-  const ext = path2.extname(filename).toLowerCase();
+  const ext = path3.extname(filename).toLowerCase();
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
     return {
       valid: false,
@@ -1319,18 +1567,18 @@ function validateFileTypeAndSize(filename, fileSize) {
   return { valid: true };
 }
 async function saveUploadedFile(buffer, originalFilename, mimeType) {
-  const ext = path2.extname(originalFilename).toLowerCase();
+  const ext = path3.extname(originalFilename).toLowerCase();
   const safeHash = crypto.randomBytes(8).toString("hex");
   const storedFilename = `${Date.now()}_${safeHash}${ext}`;
   const effectiveMime = mimeType || "application/octet-stream";
   const dataUrl = `data:${effectiveMime};base64,${buffer.toString("base64")}`;
   try {
-    const uploadDir = path2.join(os2.tmpdir(), "uploads");
-    if (!fs2.existsSync(uploadDir)) {
-      fs2.mkdirSync(uploadDir, { recursive: true });
+    const uploadDir = path3.join(os2.tmpdir(), "uploads");
+    if (!fs3.existsSync(uploadDir)) {
+      fs3.mkdirSync(uploadDir, { recursive: true });
     }
-    const localFilePath = path2.join(uploadDir, storedFilename);
-    await fs2.promises.writeFile(localFilePath, buffer);
+    const localFilePath = path3.join(uploadDir, storedFilename);
+    await fs3.promises.writeFile(localFilePath, buffer);
   } catch (err) {
     console.warn("Serverless mode disk write skipped, using Data URL fallback", err);
   }
