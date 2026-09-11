@@ -566,7 +566,15 @@ export default function SelfDestructPage() {
                 readOnly
                 value={retrievedTextData.content || ""}
                 rows={8}
-                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-slate-900 dark:text-slate-100 font-mono text-base focus:outline-none"
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    (e.target as HTMLTextAreaElement).select();
+                  }
+                }}
+                onFocus={(e) => e.target.select()}
+                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-slate-900 dark:text-slate-100 font-mono text-base focus:outline-none focus:ring-2 focus:ring-purple-500/50"
               />
             </div>
           )}

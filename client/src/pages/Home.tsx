@@ -472,7 +472,15 @@ export default function Home() {
                       </div>
 
                       {!retrievedContent ? (
-                        <div className="space-y-4 animate-in fade-in duration-500">
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (retrieveCode.length === 6 && !isRetrieving) {
+                              handleRetrieve();
+                            }
+                          }}
+                          className="space-y-4 animate-in fade-in duration-500"
+                        >
                           <div>
                             <label htmlFor="retrieve-code" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
                               Enter 6-Digit Code
@@ -484,6 +492,12 @@ export default function Home() {
                               onChange={(e) =>
                                 setRetrieveCode(e.target.value.replace(/\D/g, "").slice(0, 6))
                               }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && retrieveCode.length === 6) {
+                                  e.preventDefault();
+                                  handleRetrieve();
+                                }
+                              }}
                               maxLength={6}
                               className="text-center text-4xl tracking-widest font-mono bg-slate-50 dark:bg-slate-900/50 border-slate-300 dark:border-white/10 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:border-blue-500/50 transition duration-300 h-16"
                               aria-label="6-digit clipboard code"
@@ -495,7 +509,7 @@ export default function Home() {
                           </div>
 
                           <Button
-                            onClick={handleRetrieve}
+                            type="submit"
                             disabled={isRetrieving || retrieveCode.length !== 6}
                             className="w-full h-12 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold rounded-lg transition duration-300 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                             aria-label="Retrieve clipboard content"
@@ -512,7 +526,7 @@ export default function Home() {
                               </span>
                             )}
                           </Button>
-                        </div>
+                        </form>
                       ) : (
                         <div className="space-y-4 animate-in fade-in zoom-in duration-500">
                           <div className="p-4 bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border border-blue-500/30 rounded-lg">
@@ -531,11 +545,25 @@ export default function Home() {
                             </div>
                           )}
 
-                          <div className="p-4 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-lg max-h-64 overflow-y-auto">
+                          <div className="p-4 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-white/10 rounded-lg">
                             <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-3 uppercase tracking-wider">
                               Content
                             </p>
-                            <p className="text-slate-900 dark:text-slate-200 whitespace-pre-wrap break-words">{retrievedContent}</p>
+                            <textarea
+                              id="retrieved-content-textarea"
+                              readOnly
+                              value={retrievedContent}
+                              rows={8}
+                              onKeyDown={(e) => {
+                                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  (e.target as HTMLTextAreaElement).select();
+                                }
+                              }}
+                              onFocus={(e) => e.target.select()}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-slate-900 dark:text-slate-100 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-y"
+                            />
                           </div>
 
                           {retrievedMetadata?.expiresAt && (

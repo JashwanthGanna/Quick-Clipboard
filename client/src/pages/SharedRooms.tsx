@@ -61,6 +61,15 @@ export default function SharedRooms() {
 
   const socketRef = useRef<Socket | null>(null);
   const deletedCountRef = useRef(0);
+  const roomCodeRef = useRef(roomCode);
+  const userNameRef = useRef(userName);
+  const ownerTokenRef = useRef(ownerToken);
+  const clipboardTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const notesTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => { roomCodeRef.current = roomCode; }, [roomCode]);
+  useEffect(() => { userNameRef.current = userName; }, [userName]);
+  useEffect(() => { ownerTokenRef.current = ownerToken; }, [ownerToken]);
 
   const createRoomMutation = trpc.room.create.useMutation();
   const joinRoomMutation = trpc.room.join.useMutation();
@@ -107,11 +116,11 @@ export default function SharedRooms() {
       socketRef.current = socket;
 
       socket.on("connect", () => {
-        if (roomCode) {
+        if (roomCodeRef.current) {
           socket.emit("join_room", {
-            roomCode,
-            name: userName || "Member",
-            ownerToken,
+            roomCode: roomCodeRef.current,
+            name: userNameRef.current || "Member",
+            ownerToken: ownerTokenRef.current,
           });
         }
       });
@@ -173,7 +182,7 @@ export default function SharedRooms() {
     } catch (e) {
       console.warn("Socket initialization skipped:", e);
     }
-  }, [setLocation, roomCode, ownerToken, userName]);
+  }, [setLocation]);
 
   // Handle room polling updates (MySQL source of truth)
   useEffect(() => {
@@ -182,7 +191,7 @@ export default function SharedRooms() {
 
     if (data.isDeleted) {
       deletedCountRef.current += 1;
-      if (deletedCountRef.current >= 3) {
+      if (deletedCountRef.current >= 5) {
         toast.warning("Room was deleted or has expired.");
         setInRoom(false);
         setLocation("/rooms");
@@ -311,17 +320,25 @@ export default function SharedRooms() {
 
   const handleClipboardChange = (val: string) => {
     setClipboardText(val);
-    if (roomCode) {
-      updateClipboardMutation.mutate({ code: roomCode, text: val });
-      socketRef.current?.emit("update_clipboard", { roomCode, text: val });
+    const code = roomCodeRef.current;
+    if (code) {
+      socketRef.current?.emit("update_clipboard", { roomCode: code, text: val });
+      if (clipboardTimerRef.current) clearTimeout(clipboardTimerRef.current);
+      clipboardTimerRef.current = setTimeout(() => {
+        updateClipboardMutation.mutate({ code, text: val });
+      }, 500);
     }
   };
 
   const handleNotesChange = (val: string) => {
     setNotesText(val);
-    if (roomCode) {
-      updateNotesMutation.mutate({ code: roomCode, notes: val });
-      socketRef.current?.emit("update_notes", { roomCode, notes: val });
+    const code = roomCodeRef.current;
+    if (code) {
+      socketRef.current?.emit("update_notes", { roomCode: code, notes: val });
+      if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
+      notesTimerRef.current = setTimeout(() => {
+        updateNotesMutation.mutate({ code, notes: val });
+      }, 500);
     }
   };
 
@@ -584,6 +601,14 @@ export default function SharedRooms() {
                   rows={8}
                   value={clipboardText}
                   onChange={(e) => handleClipboardChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      (e.target as HTMLTextAreaElement).select();
+                    }
+                  }}
+                  onFocus={(e) => e.target.select()}
                   placeholder="Type or paste shared content here..."
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-4 text-slate-900 dark:text-white font-mono focus:outline-none focus:border-cyan-500"
                 />
@@ -602,6 +627,14 @@ export default function SharedRooms() {
                   rows={6}
                   value={notesText}
                   onChange={(e) => handleNotesChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      (e.target as HTMLTextAreaElement).select();
+                    }
+                  }}
+                  onFocus={(e) => e.target.select()}
                   placeholder="Add meeting notes, ideas, or key-value snippets..."
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-4 text-slate-900 dark:text-slate-200 focus:outline-none focus:border-purple-500"
                 />
