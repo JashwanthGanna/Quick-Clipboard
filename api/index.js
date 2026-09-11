@@ -238,6 +238,16 @@ function loadTempStorage() {
           memoryFiles.set(code, item);
         });
       }
+      if (data && data.rooms) {
+        Object.entries(data.rooms).forEach(([code, item]) => {
+          memoryRooms.set(code, item);
+        });
+      }
+      if (data && data.roomFiles) {
+        Object.entries(data.roomFiles).forEach(([idStr, item]) => {
+          memoryRoomFiles.set(Number(idStr), item);
+        });
+      }
     }
   } catch (err) {
   }
@@ -246,12 +256,15 @@ function saveTempStorage() {
   try {
     const data = {
       clipboards: Object.fromEntries(memoryClipboards),
-      files: Object.fromEntries(memoryFiles)
+      files: Object.fromEntries(memoryFiles),
+      rooms: Object.fromEntries(memoryRooms),
+      roomFiles: Object.fromEntries(memoryRoomFiles)
     };
     fs.writeFileSync(TEMP_STORAGE_FILE, JSON.stringify(data), "utf-8");
   } catch (err) {
   }
 }
+loadTempStorage();
 var globalStats = {
   filesSharedCount: 142,
   textSharesCount: 389,
@@ -606,6 +619,7 @@ async function createRoom(options) {
     };
     memoryRooms.set(code, room);
     globalStats.roomsCreatedCount++;
+    saveTempStorage();
     return { code, room };
   }
   let isUnique = false;
@@ -637,6 +651,7 @@ async function getRoomByCode(code) {
     if (!room2) return null;
     if (room2.expiresAt && /* @__PURE__ */ new Date() > new Date(room2.expiresAt)) {
       memoryRooms.delete(code);
+      saveTempStorage();
       return null;
     }
     return room2;
@@ -655,6 +670,7 @@ async function updateRoomClipboard(code, text2) {
   if (!db) {
     const room = memoryRooms.get(code);
     if (room) room.clipboardText = text2;
+    saveTempStorage();
     return;
   }
   await db.update(rooms).set({ clipboardText: text2 }).where(eq(rooms.code, code));
@@ -664,6 +680,7 @@ async function updateRoomNotes(code, notes) {
   if (!db) {
     const room = memoryRooms.get(code);
     if (room) room.notes = notes;
+    saveTempStorage();
     return;
   }
   await db.update(rooms).set({ notes }).where(eq(rooms.code, code));
@@ -673,6 +690,7 @@ async function updateRoomLock(code, isLocked) {
   if (!db) {
     const room = memoryRooms.get(code);
     if (room) room.isLocked = isLocked ? 1 : 0;
+    saveTempStorage();
     return;
   }
   await db.update(rooms).set({ isLocked: isLocked ? 1 : 0 }).where(eq(rooms.code, code));
@@ -686,6 +704,7 @@ async function regenerateRoomCode(oldCode) {
     memoryRooms.delete(oldCode);
     room.code = newCode;
     memoryRooms.set(newCode, room);
+    saveTempStorage();
     return newCode;
   }
   await db.update(rooms).set({ code: newCode }).where(eq(rooms.code, oldCode));
@@ -695,6 +714,7 @@ async function deleteRoom(code) {
   const db = await getDb();
   if (!db) {
     memoryRooms.delete(code);
+    saveTempStorage();
     return;
   }
   await db.delete(rooms).where(eq(rooms.code, code));
@@ -712,6 +732,7 @@ async function addRoomFile(options) {
       createdAt: /* @__PURE__ */ new Date()
     };
     memoryRoomFiles.set(item.id, item);
+    saveTempStorage();
     return item;
   }
   await db.insert(roomFiles).values(options);

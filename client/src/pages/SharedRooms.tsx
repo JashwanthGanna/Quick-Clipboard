@@ -60,6 +60,7 @@ export default function SharedRooms() {
   const [showQRModal, setShowQRModal] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
+  const deletedCountRef = useRef(0);
 
   const createRoomMutation = trpc.room.create.useMutation();
   const joinRoomMutation = trpc.room.join.useMutation();
@@ -79,7 +80,7 @@ export default function SharedRooms() {
   const syncQuery = trpc.room.getSync.useQuery(
     { code: roomCode, ownerToken },
     {
-      enabled: Boolean(inRoom && roomCode && ownerToken),
+      enabled: Boolean(inRoom && roomCode && roomCode.length === 6 && ownerToken),
       refetchInterval: 1500,
     }
   );
@@ -104,6 +105,16 @@ export default function SharedRooms() {
       });
       socket.connect();
       socketRef.current = socket;
+
+      socket.on("connect", () => {
+        if (roomCode) {
+          socket.emit("join_room", {
+            roomCode,
+            name: userName || "Member",
+            ownerToken,
+          });
+        }
+      });
 
       socket.on("room_joined", (data: any) => {
         setInRoom(true);
@@ -144,6 +155,12 @@ export default function SharedRooms() {
         toast.info(`Room link regenerated: Code is now ${data.newCode}`);
       });
 
+      socket.on("kicked_from_room", (data: any) => {
+        toast.error(data.message || "You were kicked from the room.");
+        setInRoom(false);
+        setLocation("/rooms");
+      });
+
       socket.on("room_deleted", (data: any) => {
         toast.warning(data.message || "Room was deleted.");
         setInRoom(false);
@@ -156,7 +173,7 @@ export default function SharedRooms() {
     } catch (e) {
       console.warn("Socket initialization skipped:", e);
     }
-  }, [setLocation]);
+  }, [setLocation, roomCode, ownerToken, userName]);
 
   // Handle room polling updates (MySQL source of truth)
   useEffect(() => {
@@ -164,11 +181,16 @@ export default function SharedRooms() {
     const data = syncQuery.data;
 
     if (data.isDeleted) {
-      toast.warning("Room was deleted or has expired.");
-      setInRoom(false);
-      setLocation("/rooms");
+      deletedCountRef.current += 1;
+      if (deletedCountRef.current >= 3) {
+        toast.warning("Room was deleted or has expired.");
+        setInRoom(false);
+        setLocation("/rooms");
+      }
       return;
     }
+
+    deletedCountRef.current = 0;
 
     setIsLocked(Boolean(data.isLocked));
     setIsOwner(Boolean(data.isOwner));
@@ -326,7 +348,6 @@ export default function SharedRooms() {
       setRoomCode(res.newCode);
       setLocation(`/room/${res.newCode}`);
       toast.info(`Room link regenerated: Code is now ${res.newCode}`);
-      socketRef.current?.emit("regenerate_code", { roomCode });
     } catch (err: any) {
       toast.error(err.message || "Failed to regenerate room code.");
     }
